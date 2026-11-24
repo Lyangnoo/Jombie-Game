@@ -40,6 +40,9 @@
     </div>
     <div class="flex items-center gap-2">
       <span id="headerRoomBadge" class="hidden text-xs font-mono bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-md text-amber-400"></span>
+      <button id="btnLeaveRoomHeader" onclick="leaveRoom()" class="hidden text-xs bg-rose-950/80 hover:bg-rose-900 text-rose-300 px-2.5 py-1.5 rounded-lg border border-rose-700/60 transition">
+        방 나가기
+      </button>
       <button onclick="toggleRulesModal()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition">
         규칙서
       </button>
@@ -56,6 +59,11 @@
       <button onclick="openConfigModal()" class="bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-3 py-1.5 rounded-lg">
         지금 브라우저에서 임시 Firebase 키 입력하기
       </button>
+    </div>
+
+    <!-- 새로고침 복구 중 로딩 표시 -->
+    <div id="sessionRestoringBanner" class="hidden mb-4 p-3.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-300 text-center">
+      이전 방 세션을 복구하는 중입니다...
     </div>
 
     <!-- 1. 로비 (방 생성 / 입장) -->
@@ -152,6 +160,12 @@
         </div>
         <div id="guestWaitingHint" class="hidden mt-4 text-center text-xs text-slate-400">
           방장이 게임을 시작할 때까지 대기 중입니다...
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-slate-800/80 flex justify-end">
+          <button onclick="leaveRoom()" class="text-xs text-rose-400 hover:text-rose-300 font-bold px-3 py-1.5 rounded-lg bg-rose-950/40 border border-rose-800/50">
+            대기실에서 나가기
+          </button>
         </div>
       </div>
     </section>
@@ -292,7 +306,7 @@
         <h2 id="winnerBannerTitle" class="text-3xl font-black text-white">시민 진영 승리!</h2>
         <p id="winnerBannerDesc" class="text-sm text-slate-300"></p>
         <div id="finalRoleRevealList" class="text-left space-y-1.5 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs"></div>
-        <button onclick="location.href = location.pathname" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-sm">
+        <button onclick="clearSessionAndReturnLobby()" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-sm">
           로비로 돌아가기
         </button>
       </div>
@@ -355,7 +369,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     // =========================================================================
     // [외부 무료 호스팅 배포 시 아래 객체에 본인의 Firebase 설정값을 붙여넣으세요]
@@ -368,6 +382,9 @@
       messagingSenderId: "995637638842",
       appId: "1:995637638842:web:d119a34f59933cb121f483"
     };
+
+    const SESSION_ROOM_KEY = "zombie_active_room";
+    const SESSION_NICK_KEY = "zombie_nickname";
 
     function resolveFirebaseConfig() {
       if (typeof __firebase_config !== "undefined" && __firebase_config) {
@@ -393,22 +410,60 @@
     let latestRoomData = null;
     let selectedCardIndices = [];
     let identityHidden = false;
+    let intentionalLeave = false;
+
+    const savedNick = sessionStorage.getItem(SESSION_NICK_KEY);
+    if (savedNick) {
+      document.getElementById("inputNickname").value = savedNick;
+    }
 
     if (!fbConfig) {
       document.getElementById("configWarningBanner").classList.remove("hidden");
     } else {
+      const savedRoom = sessionStorage.getItem(SESSION_ROOM_KEY);
+      if (savedRoom) {
+        document.getElementById("sessionRestoringBanner").classList.remove("hidden");
+      }
+
       app = initializeApp(fbConfig);
       auth = getAuth(app);
       db = getFirestore(app);
       signInAnonymously(auth).catch(err => console.error("Auth Error:", err));
-      onAuthStateChanged(auth, (user) => {
+
+      onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         const params = new URLSearchParams(window.location.search);
         const roomParam = params.get("room");
         if (roomParam) {
           document.getElementById("inputRoomCode").value = roomParam.toUpperCase();
         }
+
+        if (user && savedRoom && !currentRoomCode) {
+          await restoreSavedRoomSession(savedRoom);
+        }
+        document.getElementById("sessionRestoringBanner").classList.add("hidden");
       });
+    }
+
+    async function restoreSavedRoomSession(code) {
+      try {
+        const snap = await getDoc(getRoomRef(code));
+        if (!snap.exists()) {
+          sessionStorage.removeItem(SESSION_ROOM_KEY);
+          return;
+        }
+        const data = snap.data();
+        const me = data.players?.[currentUser.uid];
+        if (me) {
+          subscribeRoom(code);
+        } else {
+          // 세션에 기록된 uid가 방에 없으면 코드만 입력란에 채워 재입장 편의 제공
+          sessionStorage.removeItem(SESSION_ROOM_KEY);
+          document.getElementById("inputRoomCode").value = code;
+        }
+      } catch (e) {
+        console.error("세션 복구 실패:", e);
+      }
     }
 
     function getRoomRef(code) {
@@ -443,6 +498,14 @@
       navigator.clipboard.writeText(url).then(() => alert("초대 링크가 복사되었습니다!"));
     };
 
+    window.clearSessionAndReturnLobby = async () => {
+      if (currentRoomCode) {
+        await leaveRoom(true);
+      }
+      sessionStorage.removeItem(SESSION_ROOM_KEY);
+      location.href = `${window.location.origin}${window.location.pathname}`;
+    };
+
     function generateRoomCode() {
       const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
       let res = "";
@@ -455,6 +518,9 @@
       if (!db || !currentUser) return alert("Firebase 연결이 준비되지 않았습니다.");
       const nickname = document.getElementById("inputNickname").value.trim();
       if (!nickname) return alert("닉네임을 입력해 주세요.");
+
+      sessionStorage.setItem(SESSION_NICK_KEY, nickname);
+      intentionalLeave = false;
 
       const gmMode = document.querySelector('input[name="gmMode"]:checked').value;
       const testMode = document.getElementById("chkTestMode").checked;
@@ -486,14 +552,16 @@
             matchResultAck: true
           }
         },
-        pendingChallenge: null, // { fromId, toId, createdAt }
-        activeMatch: null,      // { p1, p2, p1Cards, p2Cards, status: 'selecting'|'resolved', result: {...} }
+        pendingChallenge: null,
+        activeMatch: null,
         logs: [`방 [${code}]이 생성되었습니다. (${gmMode === 'gm' ? '딜러 진행 모드' : '시스템 자동 모드'})`],
         winnerInfo: null,
         updatedAt: serverTimestamp()
       };
 
       await setDoc(getRoomRef(code), roomData);
+      sessionStorage.setItem(SESSION_ROOM_KEY, code);
+      history.pushState({ roomCode: code }, "", `?room=${code}`);
       subscribeRoom(code);
     };
 
@@ -504,6 +572,9 @@
       const code = document.getElementById("inputRoomCode").value.trim().toUpperCase();
       if (!nickname) return alert("닉네임을 입력해 주세요.");
       if (code.length !== 6) return alert("6자리 방 코드를 입력해 주세요.");
+
+      sessionStorage.setItem(SESSION_NICK_KEY, nickname);
+      intentionalLeave = false;
 
       const ref = getRoomRef(code);
       const snap = await getDoc(ref);
@@ -535,14 +606,97 @@
           logs: [...(data.logs || []), `${nickname}님이 입장했습니다.`]
         });
       }
+      sessionStorage.setItem(SESSION_ROOM_KEY, code);
+      history.pushState({ roomCode: code }, "", `?room=${code}`);
       subscribeRoom(code);
     };
+
+    // 방 퇴장 처리 (버튼, 창 닫기, 뒤로가기 공용)
+    window.leaveRoom = async (silent = false) => {
+      if (!currentRoomCode || !currentUser || !db) return;
+      intentionalLeave = true;
+
+      const code = currentRoomCode;
+      const uid = currentUser.uid;
+
+      if (roomUnsubscribe) {
+        roomUnsubscribe();
+        roomUnsubscribe = null;
+      }
+      currentRoomCode = null;
+      latestRoomData = null;
+      selectedCardIndices = [];
+      sessionStorage.removeItem(SESSION_ROOM_KEY);
+
+      try {
+        const ref = getRoomRef(code);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const data = snap.data();
+          const me = data.players?.[uid];
+          if (me) {
+            const updates = {};
+            const logs = [...(data.logs || []), `${me.name}님이 방에서 나갔습니다.`];
+
+            if (data.status === "waiting" || data.status === "ended") {
+              updates[`players.${uid}`] = deleteField();
+            } else {
+              // 진행 중인 게임에서는 탈락/이탈 처리하여 다른 인원 상태 유지
+              updates[`players.${uid}.alive`] = false;
+              updates[`players.${uid}.matchedThisRound`] = true;
+            }
+
+            // 방장이 나갔다면 남은 인원 중 첫 번째 인원에게 호스트 위임
+            if (data.hostId === uid) {
+              const remainingIds = Object.keys(data.players || {}).filter(id => id !== uid);
+              if (remainingIds.length > 0) {
+                updates.hostId = remainingIds[0];
+                logs.push(`${data.players[remainingIds[0]].name}님에게 방장 권한이 위임되었습니다.`);
+              }
+            }
+
+            if (data.pendingChallenge && (data.pendingChallenge.fromId === uid || data.pendingChallenge.toId === uid)) {
+              updates.pendingChallenge = null;
+            }
+
+            updates.logs = logs;
+            await updateDoc(ref, updates);
+          }
+        }
+      } catch (e) {
+        console.error("퇴장 처리 오류:", e);
+      }
+
+      if (!silent) {
+        document.getElementById("headerRoomBadge").classList.add("hidden");
+        document.getElementById("btnLeaveRoomHeader").classList.add("hidden");
+        document.getElementById("challengeModal").classList.add("hidden");
+        ["viewWaiting", "viewGame", "viewMatchArena", "viewGameOver"].forEach(v => {
+          document.getElementById(v).classList.add("hidden");
+        });
+        document.getElementById("viewLobby").classList.remove("hidden");
+      }
+    };
+
+    // 브라우저 창 닫기 / 탭 종료 / 뒤로가기 이벤트 연결
+    window.addEventListener("pagehide", () => {
+      if (currentRoomCode && !intentionalLeave) {
+        leaveRoom(true);
+      }
+    });
+
+    window.addEventListener("popstate", () => {
+      if (currentRoomCode && !intentionalLeave) {
+        leaveRoom(false);
+      }
+    });
 
     function subscribeRoom(code) {
       currentRoomCode = code;
       if (roomUnsubscribe) roomUnsubscribe();
       document.getElementById("headerRoomBadge").textContent = `ROOM: ${code}`;
       document.getElementById("headerRoomBadge").classList.remove("hidden");
+      document.getElementById("btnLeaveRoomHeader").classList.remove("hidden");
 
       roomUnsubscribe = onSnapshot(getRoomRef(code), (snap) => {
         if (!snap.exists()) return;
@@ -590,7 +744,6 @@
       const maxRounds = n <= 9 ? 5 : (n <= 11 ? 7 : 8);
       const hasQueen = n >= 12;
 
-      // 역할 배분
       const roles = ["zombie_king", "immune"];
       if (hasQueen) roles.push("zombie_queen");
       while (roles.length < n) roles.push("citizen");
@@ -725,13 +878,11 @@
         return;
       }
 
-      // 양쪽 모두 제출 완료 -> 즉시 판정 실행
       const p1Cards = isP1 ? chosen : m.p1Cards;
       const p2Cards = isP1 ? m.p2Cards : chosen;
       await resolveMatchAndAdvance(data, m.p1, m.p2, p1Cards, p2Cards);
     };
 
-    // 카드 매치 판정 핵심 로직
     const SUIT_RANK = { "♠": 4, "◆": 3, "♥": 2, "♣": 1 };
 
     function evaluateStandardHand(cards) {
@@ -748,7 +899,6 @@
           lowSuit: SUIT_RANK[sorted[1].suit]
         };
       }
-      // 특수 카드와 숫자 1장 조합 시 숫자 1장 기준
       const single = nums[0] || { value: 0, suit: "♣" };
       return {
         isPairSuit: false,
@@ -804,7 +954,6 @@
       let summary = "";
       let publicLog = `${p1.name}님과 ${p2.name}님이 밀실 매치를 마쳤습니다.`;
 
-      // 1. 조커(좀비 킹/퀸) vs 칼 충돌 우선 판정 (칼 승리 + 좀비 사망)
       if ((p1King || p1Queen) && p2Knife) {
         winnerId = id2;
         p1.alive = false;
@@ -819,11 +968,8 @@
         headline = `${p1.name} 승리! (칼로 좀비 처치)`;
         summary = `${p1.name}님이 칼 카드로 ${p2.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
         publicLog += ` (사망자 발생)`;
-      }
-      // 2. 좀비 킹 / 좀비 퀸 감염 공격
-      else if (p1King || p1Queen) {
+      } else if (p1King || p1Queen) {
         winnerId = id1;
-        // 조커 회수
         if (p1King) p1.hand.push({ type: "zombie_king", label: "좀비 킹" });
         if (p1Queen) {
           p1.queenUsesLeft = Math.max(0, p1.queenUsesLeft - 1);
@@ -850,9 +996,7 @@
           applyInfectionPenalty(p1, c1);
           summary = `${p1.name}님이 감염되었습니다! 보유 칼 카드는 회수되고 제출 패 중 최저 숫자 카드 1장을 돌려받았습니다.`;
         }
-      }
-      // 3. 칼 카드 단독 사용 판정
-      else if (p1Knife || p2Knife) {
+      } else if (p1Knife || p2Knife) {
         if (p1Knife && !p2Knife) {
           if (p2.infected) {
             winnerId = id1;
@@ -862,7 +1006,6 @@
             summary = `${p1.name}님이 칼 카드로 좀비 ${p2.name}님을 탈락시켰습니다!`;
             publicLog += ` (사망자 발생)`;
           } else {
-            // 시민 오발: 칼 사용자 패배, 칼 회수 + 함께 낸 숫자 카드 상대에게 양도
             winnerId = id2;
             p1.hand.push({ type: "knife", label: "칼" });
             const numCard = c1.find(c => c.type === "number");
@@ -887,16 +1030,13 @@
             summary = `${p2.name}님이 시민에게 칼을 사용해 패배했습니다. 칼은 회수되고 함께 낸 숫자 카드는 ${p1.name}님에게 넘어갔습니다.`;
           }
         } else {
-          // 양쪽 다 칼 사용 시 상호 오발 회수
           p1.hand.push({ type: "knife", label: "칼" });
           p2.hand.push({ type: "knife", label: "칼" });
           winnerId = compareStandard(c1, c2) >= 0 ? id1 : id2;
           headline = `${players[winnerId].name} 판정승!`;
           summary = `양쪽 모두 칼을 사용했으나 대상이 좀비가 아니어서 칼이 회수되고 숫자 비교로 승패가 갈렸습니다.`;
         }
-      }
-      // 4. 일반 카드 매치 판정 + [물어 뜯기] 고유 능력 체크
-      else {
+      } else {
         const cmp = compareStandard(c1, c2);
         winnerId = cmp >= 0 ? id1 : id2;
         const loserId = winnerId === id1 ? id2 : id1;
@@ -904,7 +1044,6 @@
         const loser = players[loserId];
         const loserCards = winnerId === id1 ? c2 : c1;
 
-        // 승리자는 패자가 낸 카드 중 가장 높은 숫자 카드 1장 획득
         const loserNums = loserCards.filter(c => c.type === "number").sort((a, b) => b.value - a.value);
         if (loserNums.length > 0) {
           winner.hand.push(loserNums[0]);
@@ -913,7 +1052,6 @@
         headline = `${winner.name} 승리!`;
         summary = `${winner.name}님이 카드 매치에서 승리해 ${loserNums[0] ? loserNums[0].label + " 카드를 획득했습니다." : "승리를 거뒀습니다."}`;
 
-        // 승리자의 물어 뜯기 활성화 여부 확인
         if (winner.infected && winner.biteActive) {
           winner.biteActive = false;
           winner.biteAvailable = false;
@@ -926,7 +1064,6 @@
         }
       }
 
-      // 패배자의 물어 뜯기 활성화 소모 처리
       if (p1.biteActive && winnerId !== id1) {
         p1.biteActive = false;
         p1.biteAvailable = false;
@@ -936,7 +1073,6 @@
         p2.biteAvailable = false;
       }
 
-      // 카드 0장 소진 탈락 체크
       [p1, p2].forEach(pl => {
         if (pl.alive && pl.hand.length === 0) {
           pl.alive = false;
@@ -951,42 +1087,33 @@
       p1.matchResultAck = false;
       p2.matchResultAck = false;
 
-      const updatedData = {
-        ...data,
-        players,
-        activeMatch: {
-          p1: id1,
-          p2: id2,
-          p1Cards: c1,
-          p2Cards: c2,
-          status: "resolved",
-          result: { winnerId, headline, summary }
-        },
-        logs: [...data.logs, publicLog]
+      const nextActiveMatch = {
+        p1: id1,
+        p2: id2,
+        p1Cards: c1,
+        p2Cards: c2,
+        status: "resolved",
+        result: { winnerId, headline, summary }
       };
 
       await updateDoc(getRoomRef(data.code), {
         players,
-        activeMatch: updatedData.activeMatch,
-        logs: updatedData.logs
+        activeMatch: nextActiveMatch,
+        logs: [...data.logs, publicLog]
       });
     }
 
-    // 감염 페널티: 칼 회수 + 제출 패 중 최저 숫자 카드 1장 반환 + 물어 뜯기 고유 능력 부여
     function applyInfectionPenalty(player, submittedCards) {
       player.infected = true;
       player.biteAvailable = true;
       player.biteActive = false;
-      // 손패의 칼 회수
       player.hand = player.hand.filter(c => c.type !== "knife");
-      // 제출 패 중 가장 낮은 숫자 카드 1장 반환
       const nums = submittedCards.filter(c => c.type === "number").sort((a, b) => a.value - b.value);
       if (nums.length > 0) {
         player.hand.push(nums[0]);
       }
     }
 
-    // 매치 결과 확인 후 복귀 & 라운드 자동 진행 체크
     window.leaveMatchArena = async () => {
       const data = latestRoomData;
       const m = data?.activeMatch;
@@ -1012,12 +1139,10 @@
       await checkAndAdvanceRound(latestRoomData, true);
     };
 
-    // 라운드 종료 / 4R 보너스 / 승리 판정
     async function checkAndAdvanceRound(data, force = false) {
       const players = JSON.parse(JSON.stringify(data.players));
       const aliveList = Object.values(players).filter(p => !p.isGM && p.alive);
 
-      // 즉시 승리 조건 체크
       const zombies = aliveList.filter(p => p.infected);
       const humans = aliveList.filter(p => !p.infected);
       const nonImmuneHumans = humans.filter(p => p.role !== "immune");
@@ -1030,7 +1155,6 @@
         return finishGame(data.code, players, "좀비 진영 승리!", "면역자를 제외한 모든 시민이 감염되었습니다.");
       }
 
-      // 남은 미매치 인원이 1명 이하(홀수 잔류 패스)면 라운드 종료
       const unmatched = aliveList.filter(p => !p.matchedThisRound);
       if (!force && unmatched.length > 1) return;
 
@@ -1039,7 +1163,6 @@
         logs.push(`${unmatched[0].name}님이 마지막 홀수 인원으로 남아 이번 라운드를 패스합니다. (보충 없음)`);
       }
 
-      // 최종 라운드 종료 시 승패 판정
       if (data.round >= data.maxRounds) {
         if (humans.length > zombies.length) {
           return finishGame(data.code, players, "시민 진영 승리!", `최종 ${data.maxRounds}라운드 종료 결과 시민(${humans.length}명)이 좀비(${zombies.length}명)보다 많습니다.`);
@@ -1054,7 +1177,6 @@
         }
       }
 
-      // 다음 라운드 준비: 매치 참여자는 +1장 보충, 4라운드 종료 시 전원 +1장 보너스
       const deck = [...(data.deck || [])];
       const isRound4Bonus = data.round === 4;
 
@@ -1087,10 +1209,12 @@
       });
     }
 
-    // 전체 화면 렌더링
     function renderAll(data) {
       const views = ["viewLobby", "viewWaiting", "viewGame", "viewMatchArena", "viewGameOver"];
       views.forEach(v => document.getElementById(v).classList.add("hidden"));
+      document.getElementById("headerRoomBadge").textContent = `ROOM: ${data.code}`;
+      document.getElementById("headerRoomBadge").classList.remove("hidden");
+      document.getElementById("btnLeaveRoomHeader").classList.remove("hidden");
 
       if (data.status === "waiting") {
         document.getElementById("viewWaiting").classList.remove("hidden");
@@ -1104,7 +1228,6 @@
         return;
       }
 
-      // 매치 신청 팝업 처리
       const ch = data.pendingChallenge;
       const challengeModal = document.getElementById("challengeModal");
       if (ch && ch.toId === currentUser.uid) {
@@ -1114,7 +1237,6 @@
         challengeModal.classList.add("hidden");
       }
 
-      // 당사자 2명만 1:1 밀실 아레나 진입
       const m = data.activeMatch;
       if (m && (m.p1 === currentUser.uid || m.p2 === currentUser.uid)) {
         const me = data.players[currentUser.uid];
@@ -1173,7 +1295,6 @@
       document.getElementById("gameRoundTypeBadge").textContent = isOdd ? "홀수 라운드 (좀비 킹 활성)" : "짝수 라운드 (좀비 퀸 활성)";
       document.getElementById("aliveCountLabel").textContent = `${alivePlayers.length} / ${allPlayers.length}명`;
 
-      // GM 전용 패널
       const gmBox = document.getElementById("gmDashboard");
       const playerBox = document.getElementById("playerDashboard");
       if (me.isGM) {
@@ -1194,7 +1315,6 @@
         renderPlayerSelf(data, me, allPlayers);
       }
 
-      // 로그
       document.getElementById("gameLogList").innerHTML = [...(data.logs || [])].reverse().map(l => `
         <div class="bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80">${l}</div>
       `).join("");
@@ -1228,7 +1348,6 @@
       };
       roleDesc.textContent = descMap[me.role] || "";
 
-      // 좀비 킹에게 면역자 공개
       if (me.role === "zombie_king") {
         const immunePlayer = allPlayers.find(p => p.role === "immune");
         secretIntel.classList.remove("hidden");
@@ -1237,7 +1356,6 @@
         secretIntel.classList.add("hidden");
       }
 
-      // 감염자 고유 능력 [물어 뜯기]
       const biteBox = document.getElementById("biteAbilityBox");
       if (me.alive && me.infected && me.biteAvailable && me.role === "citizen") {
         biteBox.classList.remove("hidden");
@@ -1248,11 +1366,9 @@
         biteBox.classList.add("hidden");
       }
 
-      // 손패 렌더링
       document.getElementById("myHandCount").textContent = me.hand.length;
       document.getElementById("myHandContainer").innerHTML = me.hand.map(c => renderCardBadge(c)).join("");
 
-      // 매치 상대 목록
       const stateLabel = document.getElementById("myRoundMatchState");
       const targetList = document.getElementById("matchTargetList");
       if (!me.alive) {
@@ -1306,7 +1422,6 @@
         const isOdd = data.round % 2 === 1;
         document.getElementById("arenaHandGrid").innerHTML = me.hand.map((c, idx) => {
           const selected = selectedCardIndices.includes(idx);
-          // 좀비 킹은 홀수 라운드만, 좀비 퀸은 짝수 라운드만 사용 가능
           const roundBlocked = (c.type === "zombie_king" && !isOdd) || (c.type === "zombie_queen" && isOdd);
           const disabled = !!mySubmitted || roundBlocked;
           return `
