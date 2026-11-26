@@ -186,7 +186,7 @@
       </div>
     </section>
 
-    <!-- 3. 인게임 개인 화면 & GM 뷰 -->
+    <!-- 3. 인게임 개인 화면 / 관전 모드 / GM 뷰 -->
     <section id="viewGame" class="hidden space-y-4">
       <!-- 라운드 상단 상태바 -->
       <div class="glass-panel rounded-2xl p-4 flex items-center justify-between">
@@ -211,7 +211,29 @@
         <div id="gmPlayerTable" class="space-y-1.5 text-xs"></div>
       </div>
 
-      <!-- 일반 플레이어 개인 화면 -->
+      <!-- 탈락자 전용 관전 모드 화면 -->
+      <div id="spectatorDashboard" class="hidden space-y-4">
+        <div class="glass-panel rounded-2xl p-5 border-slate-600/70 space-y-2 text-center">
+          <span class="inline-block text-[11px] font-black tracking-widest px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+            SPECTATOR MODE
+          </span>
+          <h3 class="text-xl font-black text-white pt-1">탈락 — 관전 모드로 전환되었습니다</h3>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            현재 게임이 끝날 때까지 관전 구역에서 생존자들의 라운드 진행과 매치 상황을 지켜볼 수 있습니다.<br/>
+            (스포일러 방지를 위해 생존자들의 역할·손패는 게임 종료 시 공개됩니다.)
+          </p>
+        </div>
+
+        <div class="glass-panel rounded-2xl p-4 card-shadow space-y-2.5">
+          <div class="flex items-center justify-between">
+            <h4 class="font-bold text-white text-sm">현장 참가자 관전 현황</h4>
+            <span id="spectatorRoundInfo" class="text-[11px] text-amber-400 font-bold"></span>
+          </div>
+          <div id="spectatorRosterList" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs"></div>
+        </div>
+      </div>
+
+      <!-- 일반 생존 플레이어 개인 화면 -->
       <div id="playerDashboard" class="space-y-4">
         <div class="glass-panel rounded-2xl p-4 card-shadow">
           <div class="flex items-center justify-between mb-2">
@@ -250,7 +272,7 @@
         <div class="glass-panel rounded-2xl p-4 card-shadow">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-bold text-white text-sm">내 보유 카드 (<span id="myHandCount">0</span>장)</h3>
-            <span class="text-[11px] text-slate-400">카드가 0장이 되면 비공개 탈락</span>
+            <span class="text-[11px] text-slate-400">카드가 0장이 되면 탈락(관전 전환)</span>
           </div>
           <div id="myHandContainer" class="grid grid-cols-3 sm:grid-cols-5 gap-2"></div>
         </div>
@@ -473,7 +495,6 @@
       return doc(db, "artifacts", appIdNamespace, "public", "data", "match_history", id);
     }
 
-    // 이전 게임 전적 로드 (결과만 표시, 방 재입장 불가)
     window.loadMatchHistory = async () => {
       if (!db) return;
       const container = document.getElementById("historyListContainer");
@@ -541,7 +562,6 @@
       }
     }
 
-    // UI 헬퍼
     window.toggleRulesModal = () => document.getElementById("rulesModal").classList.toggle("hidden");
     window.openConfigModal = () => document.getElementById("configModal").classList.remove("hidden");
     window.closeConfigModal = () => document.getElementById("configModal").classList.add("hidden");
@@ -581,7 +601,6 @@
       return res;
     }
 
-    // 방 생성 (joinedAt 기록)
     window.createRoom = async () => {
       if (!db || !currentUser) return alert("Firebase 연결이 준비되지 않았습니다.");
       const nickname = document.getElementById("inputNickname").value.trim();
@@ -636,7 +655,6 @@
       subscribeRoom(code);
     };
 
-    // 방 입장 (joinedAt 기록)
     window.joinRoom = async () => {
       if (!db || !currentUser) return alert("Firebase 연결이 준비되지 않았습니다.");
       const nickname = document.getElementById("inputNickname").value.trim();
@@ -683,9 +701,6 @@
       subscribeRoom(code);
     };
 
-    // 방 퇴장 처리:
-    // 1) 입장 순서(joinedAt)대로 다음 방장 승계
-    // 2) 남은 인원이 0명이면 방 문서 자체를 즉시 삭제(deleteDoc)
     window.leaveRoom = async (silent = false) => {
       if (!currentRoomCode || !currentUser || !db) return;
       intentionalLeave = true;
@@ -712,29 +727,24 @@
             .filter(p => p.uid !== uid)
             .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
 
-          // 마지막 인원까지 모두 나가면 방 즉시 삭제
           if (remainingPlayers.length === 0) {
             await deleteDoc(ref);
           } else if (me) {
             const updates = {};
             const logs = [...(data.logs || []), `${me.name}님이 방에서 나갔습니다.`];
 
-            // 대기실 또는 게임 종료 상태에서는 플레이어 필드 완전 제거
             if (data.status === "waiting" || data.status === "ended") {
               updates[`players.${uid}`] = deleteField();
             } else {
-              // 진행 중인 게임에서는 플레이어 엔트리 제거 대신 탈락 처리하거나, 게임 종료 시 삭제되도록 처리
               updates[`players.${uid}`] = deleteField();
               logs.push(`(중도 퇴장으로 인원 목록에서 제외됨)`);
             }
 
-            // 방장이 나갔다면 입장 순서(joinedAt)가 가장 빠른 다음 사람에게 방장 승계
             if (data.hostId === uid) {
               const nextHost = remainingPlayers[0];
               updates.hostId = nextHost.uid;
               logs.push(`👑 입장 순서에 따라 ${nextHost.name}님이 새 방장이 되었습니다.`);
 
-              // 딜러(GM) 모드 방에서 GM이 나간 경우 다음 방장에게 GM 권한 승계
               if (data.gmMode === "gm" && me.isGM) {
                 updates[`players.${nextHost.uid}.isGM`] = true;
                 logs.push(`👑 ${nextHost.name}님이 딜러(GM) 역할을 이어받습니다.`);
@@ -786,7 +796,6 @@
 
       roomUnsubscribe = onSnapshot(getRoomRef(code), (snap) => {
         if (!snap.exists()) {
-          // 방이 삭제된 경우 로비로 복귀
           sessionStorage.removeItem(SESSION_ROOM_KEY);
           currentRoomCode = null;
           document.getElementById("headerRoomBadge").classList.add("hidden");
@@ -903,7 +912,9 @@
 
     window.sendChallenge = async (targetId) => {
       const data = latestRoomData;
-      if (!data || data.pendingChallenge || data.activeMatch) {
+      const me = data?.players?.[currentUser.uid];
+      if (!me || !me.alive) return;
+      if (data.pendingChallenge || data.activeMatch) {
         return alert("현재 다른 매치 신청이나 대결이 진행 중입니다. 잠시 후 시도해 주세요.");
       }
       await updateDoc(getRoomRef(data.code), {
@@ -1052,14 +1063,14 @@
         p1.hand = [];
         headline = `${p2.name} 승리! (칼로 좀비 처치)`;
         summary = `${p2.name}님이 칼 카드로 ${p1.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
-        publicLog += ` (사망자 발생)`;
+        publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
       } else if ((p2King || p2Queen) && p1Knife) {
         winnerId = id1;
         p2.alive = false;
         p2.hand = [];
         headline = `${p1.name} 승리! (칼로 좀비 처치)`;
         summary = `${p1.name}님이 칼 카드로 ${p2.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
-        publicLog += ` (사망자 발생)`;
+        publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
       } else if (p1King || p1Queen) {
         winnerId = id1;
         if (p1King) p1.hand.push({ type: "zombie_king", label: "좀비 킹" });
@@ -1096,7 +1107,7 @@
             p2.hand = [];
             headline = `${p1.name} 승리! (좀비 처치)`;
             summary = `${p1.name}님이 칼 카드로 좀비 ${p2.name}님을 탈락시켰습니다!`;
-            publicLog += ` (사망자 발생)`;
+            publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id2;
             p1.hand.push({ type: "knife", label: "칼" });
@@ -1112,7 +1123,7 @@
             p1.hand = [];
             headline = `${p2.name} 승리! (좀비 처치)`;
             summary = `${p2.name}님이 칼 카드로 좀비 ${p1.name}님을 탈락시켰습니다!`;
-            publicLog += ` (사망자 발생)`;
+            publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id1;
             p2.hand.push({ type: "knife", label: "칼" });
@@ -1168,7 +1179,7 @@
       [p1, p2].forEach(pl => {
         if (pl.alive && pl.hand.length === 0) {
           pl.alive = false;
-          publicLog += ` (${pl.name}님 카드 소진으로 비공개 탈락)`;
+          publicLog += ` (${pl.name} 카드 소진 탈락 · 관전 전환)`;
         }
       });
 
@@ -1293,7 +1304,6 @@
       });
     }
 
-    // 게임 종료 시 방 상태 업데이트 + 전적(match_history) 영구 저장
     async function finishGame(data, players, title, desc) {
       const code = data.code;
       const participants = Object.values(players)
@@ -1347,9 +1357,10 @@
         return;
       }
 
+      const me = data.players?.[currentUser.uid];
       const ch = data.pendingChallenge;
       const challengeModal = document.getElementById("challengeModal");
-      if (ch && ch.toId === currentUser.uid) {
+      if (ch && ch.toId === currentUser.uid && me && me.alive) {
         document.getElementById("challengerNameText").textContent = data.players[ch.fromId]?.name || "상대방";
         challengeModal.classList.remove("hidden");
       } else {
@@ -1357,8 +1368,7 @@
       }
 
       const m = data.activeMatch;
-      if (m && (m.p1 === currentUser.uid || m.p2 === currentUser.uid)) {
-        const me = data.players[currentUser.uid];
+      if (m && (m.p1 === currentUser.uid || m.p2 === currentUser.uid) && me && me.alive) {
         if (m.status === "selecting" || !me.matchResultAck) {
           document.getElementById("viewMatchArena").classList.remove("hidden");
           renderMatchArena(data);
@@ -1375,7 +1385,6 @@
       const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${data.code}`;
       document.getElementById("qrCodeImg").src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(inviteUrl)}`;
 
-      // 입장 순서(joinedAt)대로 정렬 표시
       const list = Object.values(data.players).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
       const activePlayers = list.filter(p => !p.isGM);
       document.getElementById("waitingCount").textContent = activePlayers.length;
@@ -1417,7 +1426,9 @@
     function renderGameDashboard(data) {
       const me = data.players[currentUser.uid];
       if (!me) return;
-      const allPlayers = Object.values(data.players).filter(p => !p.isGM);
+      const allPlayers = Object.values(data.players)
+        .filter(p => !p.isGM)
+        .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
       const alivePlayers = allPlayers.filter(p => p.alive);
 
       document.getElementById("gameRoundLabel").textContent = `${data.round} / ${data.maxRounds} 라운드`;
@@ -1426,21 +1437,37 @@
       document.getElementById("aliveCountLabel").textContent = `${alivePlayers.length} / ${allPlayers.length}명`;
 
       const gmBox = document.getElementById("gmDashboard");
+      const spectatorBox = document.getElementById("spectatorDashboard");
       const playerBox = document.getElementById("playerDashboard");
+
+      gmBox.classList.add("hidden");
+      spectatorBox.classList.add("hidden");
+      playerBox.classList.add("hidden");
+
       if (me.isGM) {
         gmBox.classList.remove("hidden");
-        playerBox.classList.add("hidden");
         document.getElementById("gmPlayerTable").innerHTML = allPlayers.map(p => `
           <div class="flex items-center justify-between bg-slate-950 px-3 py-2 rounded-lg border border-slate-800">
             <div>
               <span class="font-bold ${p.alive ? 'text-white' : 'text-slate-500 line-through'}">${p.name}</span>
               <span class="ml-2 text-[11px] ${p.infected ? 'text-red-400' : 'text-emerald-400'}">[${translateRole(p)}]</span>
             </div>
-            <span class="text-slate-400">손패 ${p.hand.length}장 · ${p.matchedThisRound ? '매치완료' : '대기'}</span>
+            <span class="text-slate-400">${p.alive ? `손패 ${p.hand.length}장 · ${p.matchedThisRound ? '매치완료' : '대기'}` : '탈락(관전중)'}</span>
+          </div>
+        `).join("");
+      } else if (!me.alive) {
+        // 탈락자 전용 관전 모드 화면 렌더링 (정체/손패 비공개 유지)
+        spectatorBox.classList.remove("hidden");
+        document.getElementById("spectatorRoundInfo").textContent = `${data.round}R 진행 중 · 생존 ${alivePlayers.length}명`;
+        document.getElementById("spectatorRosterList").innerHTML = allPlayers.map(p => `
+          <div class="flex items-center justify-between bg-slate-950 px-3 py-2 rounded-xl border ${p.alive ? 'border-emerald-800/40' : 'border-slate-800/80 opacity-65'}">
+            <span class="font-bold ${p.alive ? 'text-white' : 'text-slate-500 line-through'}">${p.name}${p.uid === me.uid ? ' (나)' : ''}</span>
+            <span class="text-[11px] font-bold ${p.alive ? 'text-emerald-400' : 'text-rose-400'}">
+              ${p.alive ? (p.matchedThisRound ? '생존 · 매치완료' : '생존 · 매치대기') : '탈락 · 관전'}
+            </span>
           </div>
         `).join("");
       } else {
-        gmBox.classList.add("hidden");
         playerBox.classList.remove("hidden");
         renderPlayerSelf(data, me, allPlayers);
       }
@@ -1459,10 +1486,7 @@
       roleTitle.textContent = translateRole(me);
       roleTitle.className = `text-xl font-black ${me.infected ? 'text-red-500' : (me.role === 'immune' ? 'text-cyan-400' : 'text-emerald-400')}`;
 
-      if (!me.alive) {
-        statusBadge.textContent = "사망 (탈락)";
-        statusBadge.className = "text-xs font-bold px-2.5 py-1 rounded-full bg-slate-800 text-slate-400";
-      } else if (me.infected) {
+      if (me.infected) {
         statusBadge.textContent = "감염됨 (좀비 진영)";
         statusBadge.className = "text-xs font-bold px-2.5 py-1 rounded-full bg-red-950 text-red-400 border border-red-700/50";
       } else {
@@ -1501,10 +1525,7 @@
 
       const stateLabel = document.getElementById("myRoundMatchState");
       const targetList = document.getElementById("matchTargetList");
-      if (!me.alive) {
-        stateLabel.textContent = "탈락 상태";
-        targetList.innerHTML = `<p class="text-xs text-slate-500 col-span-2">탈락하여 더 이상 매치에 참여할 수 없습니다.</p>`;
-      } else if (me.matchedThisRound) {
+      if (me.matchedThisRound) {
         stateLabel.textContent = "이번 라운드 매치 완료";
         targetList.innerHTML = `<p class="text-xs text-slate-400 col-span-2">다른 플레이어들의 매치가 끝날 때까지 대기 중입니다.</p>`;
       } else {
