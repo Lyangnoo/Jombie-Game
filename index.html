@@ -380,11 +380,11 @@
         <li><strong>역할 구성:</strong>
           <br/>- <strong>좀비 킹:</strong> 면역자를 알고 시작. 홀수 라운드에 <em>좀비 킹 카드</em>를 내면 무조건 승리 및 상대 감염(칼 카드에는 패배·사망). 동률 시 생존해 있으면 좀비 승리.
           <br/>- <strong>좀비 퀸 (12인+):</strong> 짝수 라운드에만 총 2회 <em>좀비 퀸 카드</em>로 감염 가능. 면역자를 모르며 승리 동률 조건에는 미포함.
-          <br/>- <strong>면역자:</strong> 좀비에게 감염되지 않으며 <em>칼 카드</em>를 2장 보유하고 시작.
-          <br/>- <strong>시민:</strong> <em>칼 카드</em> 1장 보유. 좀비에게 칼을 쓰면 좀비 즉사, 시민에게 칼을 쓰면 사용자 패배(칼 회수·함께 낸 숫자 카드 상대 양도).
+          <br/>- <strong>면역자:</strong> 좀비에게 감염되지 않으며 <strong>특수 칼 카드</strong>(총 2회 사용 가능) 1장과 숫자 카드 4장을 보유하고 시작.
+          <br/>- <strong>시민:</strong> <em>칼 카드</em> 1장과 숫자 카드 4장 보유. 좀비에게 칼을 쓰면 좀비 즉사, 시민에게 칼을 쓰면 사용자 패배(칼 회수·함께 낸 숫자 카드 상대 양도).
         </li>
         <li><strong>감염 페널티 & 물어 뜯기:</strong> 시민이 감염되면 보유 중인 <em>칼 카드</em>가 즉시 회수되고, 해당 매치에서 낸 카드 중 가장 낮은 숫자 카드 1장을 돌려받습니다. 감염자는 매치 전 개인 화면에서 1회성 고유 능력 <strong>[물어 뜯기]</strong>를 활성화해 승리 시 상대를 감염시킬 수 있습니다.</li>
-        <li><strong>카드 매치 판정:</strong> 칼 vs 좀비(칼 승) → 좀비 킹/퀸 확정 감염 → 같은 문양 2장(숫자 합 비교) → 다른 문양 2장(최고 숫자 → 차순위 숫자 → 문양 서열 ♠&gt;◆&gt;♥&gt;♣ 순). 승리자는 패자의 가장 높은 숫자 카드 1장을 획득.</li>
+        <li><strong>카드 매치 판정:</strong> 칼/특수칼 vs 좀비(칼 승) → 좀비 킹/퀸 확정 감염 → 같은 문양 2장(숫자 합 비교) → 다른 문양 2장(최고 숫자 → 차순위 숫자 → 문양 서열 ♠&gt;◆&gt;♥&gt;♣ 순). 승리자는 패자의 가장 높은 숫자 카드 1장을 획득.</li>
       </ul>
     </div>
   </div>
@@ -445,7 +445,6 @@
     let currentRoomCode = null;
     let roomUnsubscribe = null;
     let latestRoomData = null;
-    // 카드 고유 id 배열로 관리해 인덱스 꼬임 원천 차단
     let selectedCardIds = [];
     let activeMatchIdTracking = null;
     let identityHidden = false;
@@ -855,6 +854,10 @@
       return a;
     }
 
+    function isAnyKnife(card) {
+      return card.type === "knife" || card.type === "special_knife";
+    }
+
     window.startGame = async () => {
       const data = latestRoomData;
       if (!data || data.hostId !== currentUser.uid) return;
@@ -885,9 +888,10 @@
         } else if (role === "zombie_queen") {
           hand.push({ id: makeCardId("queen"), type: "zombie_queen", label: "좀비 퀸" });
         } else if (role === "immune") {
-          hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
-          hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+          // 면역자는 '특수 칼' 1장(2회 사용 가능) + 숫자 카드 4장 = 총 5장 시작
+          hand.push({ id: makeCardId("spknife"), type: "special_knife", label: "특수 칼", usesLeft: 2 });
         } else {
+          // 시민은 일반 '칼' 1장 + 숫자 카드 4장 = 총 5장 시작
           hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
         }
         while (hand.length < 5 && deck.length > 0) {
@@ -1021,7 +1025,6 @@
       return false;
     }
 
-    // 고유 cardId 기준으로 2장 선택 토글
     window.toggleSelectMatchCard = (cardId) => {
       const data = latestRoomData;
       const m = getMyActiveMatch(data);
@@ -1049,7 +1052,6 @@
       renderMatchArena(data, m);
     };
 
-    // 선택한 카드 제출 (재시도 루프 포함으로 경합에도 확실히 커밋)
     window.submitMatchCards = async () => {
       if (isSubmittingMatch) return;
       const data = latestRoomData;
@@ -1197,6 +1199,32 @@
       return remaining;
     }
 
+    // 특수 칼 카드 사용 시 남은 횟수 차감 및 손패 유지/소멸 처리
+    function consumeSpecialKnife(player, cardObj) {
+      const baseUses = typeof cardObj.usesLeft === "number" ? cardObj.usesLeft : 2;
+      const nextUses = baseUses - 1;
+      if (nextUses > 0) {
+        player.hand.push({
+          id: cardObj.id || makeCardId("spknife"),
+          type: "special_knife",
+          label: "특수 칼",
+          usesLeft: nextUses
+        });
+      }
+      return nextUses;
+    }
+
+    // 오발 등으로 특수 칼 횟수를 돌려줄 때 복원
+    function refundSpecialKnife(player, cardObj) {
+      const uses = typeof cardObj.usesLeft === "number" ? cardObj.usesLeft : 2;
+      player.hand.push({
+        id: cardObj.id || makeCardId("spknife"),
+        type: "special_knife",
+        label: "특수 칼",
+        usesLeft: uses
+      });
+    }
+
     function computeMatchOutcome(data, id1, id2, c1, c2) {
       const players = JSON.parse(JSON.stringify(data.players));
       const p1 = players[id1];
@@ -1205,13 +1233,15 @@
       p1.hand = removeSubmittedFromHand(p1.hand, c1);
       p2.hand = removeSubmittedFromHand(p2.hand, c2);
 
-      const hasType = (cards, t) => cards.some(c => c.type === t);
-      const p1Knife = hasType(c1, "knife");
-      const p2Knife = hasType(c2, "knife");
-      const p1King = hasType(c1, "zombie_king");
-      const p2King = hasType(c2, "zombie_king");
-      const p1Queen = hasType(c1, "zombie_queen");
-      const p2Queen = hasType(c2, "zombie_queen");
+      const findCard = (cards, pred) => cards.find(pred) || null;
+      const p1KnifeCard = findCard(c1, isAnyKnife);
+      const p2KnifeCard = findCard(c2, isAnyKnife);
+      const p1Knife = !!p1KnifeCard;
+      const p2Knife = !!p2KnifeCard;
+      const p1King = c1.some(c => c.type === "zombie_king");
+      const p2King = c2.some(c => c.type === "zombie_king");
+      const p1Queen = c1.some(c => c.type === "zombie_queen");
+      const p2Queen = c2.some(c => c.type === "zombie_queen");
 
       let winnerId = null;
       let headline = "";
@@ -1222,15 +1252,17 @@
         winnerId = id2;
         p1.alive = false;
         p1.hand = [];
-        headline = `${p2.name} 승리! (칼로 좀비 처치)`;
-        summary = `${p2.name}님이 칼 카드로 ${p1.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
+        if (p2KnifeCard.type === "special_knife") consumeSpecialKnife(p2, p2KnifeCard);
+        headline = `${p2.name} 승리! (${p2KnifeCard.label}로 좀비 처치)`;
+        summary = `${p2.name}님이 ${p2KnifeCard.label} 카드로 ${p1.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
         publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
       } else if ((p2King || p2Queen) && p1Knife) {
         winnerId = id1;
         p2.alive = false;
         p2.hand = [];
-        headline = `${p1.name} 승리! (칼로 좀비 처치)`;
-        summary = `${p1.name}님이 칼 카드로 ${p2.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
+        if (p1KnifeCard.type === "special_knife") consumeSpecialKnife(p1, p1KnifeCard);
+        headline = `${p1.name} 승리! (${p1KnifeCard.label}로 좀비 처치)`;
+        summary = `${p1.name}님이 ${p1KnifeCard.label} 카드로 ${p2.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
         publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
       } else if (p1King || p1Queen) {
         winnerId = id1;
@@ -1266,36 +1298,49 @@
             winnerId = id1;
             p2.alive = false;
             p2.hand = [];
+            if (p1KnifeCard.type === "special_knife") consumeSpecialKnife(p1, p1KnifeCard);
             headline = `${p1.name} 승리! (좀비 처치)`;
-            summary = `${p1.name}님이 칼 카드로 좀비 ${p2.name}님을 탈락시켰습니다!`;
+            summary = `${p1.name}님이 ${p1KnifeCard.label} 카드로 좀비 ${p2.name}님을 탈락시켰습니다!`;
             publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id2;
-            p1.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+            if (p1KnifeCard.type === "special_knife") {
+              refundSpecialKnife(p1, p1KnifeCard);
+            } else {
+              p1.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+            }
             const numCard = c1.find(c => c.type === "number");
             if (numCard) p2.hand.push({ ...numCard, id: numCard.id || makeCardId("num") });
             headline = `${p2.name} 승리! (칼 오발)`;
-            summary = `${p1.name}님이 시민에게 칼을 사용해 패배했습니다. 칼은 회수되고 함께 낸 숫자 카드는 ${p2.name}님에게 넘어갔습니다.`;
+            summary = `${p1.name}님이 시민에게 ${p1KnifeCard.label}을 사용해 패배했습니다. 칼은 회수되고 함께 낸 숫자 카드는 ${p2.name}님에게 넘어갔습니다.`;
           }
         } else if (p2Knife && !p1Knife) {
           if (p1.infected) {
             winnerId = id2;
             p1.alive = false;
             p1.hand = [];
+            if (p2KnifeCard.type === "special_knife") consumeSpecialKnife(p2, p2KnifeCard);
             headline = `${p2.name} 승리! (좀비 처치)`;
-            summary = `${p2.name}님이 칼 카드로 좀비 ${p1.name}님을 탈락시켰습니다!`;
+            summary = `${p2.name}님이 ${p2KnifeCard.label} 카드로 좀비 ${p1.name}님을 탈락시켰습니다!`;
             publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id1;
-            p2.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+            if (p2KnifeCard.type === "special_knife") {
+              refundSpecialKnife(p2, p2KnifeCard);
+            } else {
+              p2.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+            }
             const numCard = c2.find(c => c.type === "number");
             if (numCard) p1.hand.push({ ...numCard, id: numCard.id || makeCardId("num") });
             headline = `${p1.name} 승리! (칼 오발)`;
-            summary = `${p2.name}님이 시민에게 칼을 사용해 패배했습니다. 칼은 회수되고 함께 낸 숫자 카드는 ${p1.name}님에게 넘어갔습니다.`;
+            summary = `${p2.name}님이 시민에게 ${p2KnifeCard.label}을 사용해 패배했습니다. 칼은 회수되고 함께 낸 숫자 카드는 ${p1.name}님에게 넘어갔습니다.`;
           }
         } else {
-          p1.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
-          p2.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+          if (p1KnifeCard.type === "special_knife") refundSpecialKnife(p1, p1KnifeCard);
+          else p1.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+          if (p2KnifeCard.type === "special_knife") refundSpecialKnife(p2, p2KnifeCard);
+          else p2.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+
           winnerId = compareStandard(c1, c2) >= 0 ? id1 : id2;
           headline = `${players[winnerId].name} 판정승!`;
           summary = `양쪽 모두 칼을 사용했으나 대상이 좀비가 아니어서 칼이 회수되고 숫자 비교로 승패가 갈렸습니다.`;
@@ -1362,7 +1407,7 @@
       player.infected = true;
       player.biteAvailable = true;
       player.biteActive = false;
-      player.hand = player.hand.filter(c => c.type !== "knife");
+      player.hand = player.hand.filter(c => !isAnyKnife(c));
       const nums = submittedCards.filter(c => c.type === "number").sort((a, b) => a.value - b.value);
       if (nums.length > 0) {
         player.hand.push({ ...nums[0], id: nums[0].id || makeCardId("num") });
@@ -1675,10 +1720,13 @@
         statusBadge.className = "text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-700/50";
       }
 
+      const spKnifeCard = (me.hand || []).find(c => c.type === "special_knife");
+      const spKnifeLeft = spKnifeCard ? (spKnifeCard.usesLeft ?? 2) : 0;
+
       const descMap = {
         zombie_king: "홀수 라운드에 '좀비 킹' 카드를 내면 상대를 감염시킵니다. 동률 시 생존해 있으면 좀비가 승리합니다.",
         zombie_queen: `짝수 라운드에만 '좀비 퀸' 카드로 총 2회 감염시킬 수 있습니다. (남은 횟수: ${me.queenUsesLeft}회)`,
-        immune: "좀비에게 절대 감염되지 않으며, 칼 카드를 2장 보유합니다.",
+        immune: `좀비에게 절대 감염되지 않으며, '특수 칼' 1장(총 2회 사용·남은 횟수 ${spKnifeLeft}회)과 숫자 카드 4장으로 시작합니다.`,
         citizen: me.infected ? "좀비에게 감염되어 승리 목표가 좀비 승리로 바뀌었습니다!" : "칼 카드로 좀비를 처치하고 최종 라운드까지 시민 과반수를 유지하세요."
       };
       roleDesc.textContent = descMap[me.role] || "";
@@ -1773,6 +1821,9 @@
           const selected = selectedCardIds.includes(c.id);
           const roundBlocked = (c.type === "zombie_king" && !isOdd) || (c.type === "zombie_queen" && isOdd);
           const disabled = !!mySubmitted || roundBlocked || isSubmittingMatch;
+          const subLabel = c.type === "special_knife"
+            ? `${c.usesLeft ?? 2}회 남음`
+            : (roundBlocked ? "라운드 제한" : (selected ? "선택됨" : "카드"));
           return `
             <button onclick="toggleSelectMatchCard('${c.id}')" ${disabled ? "disabled" : ""}
               class="p-3 rounded-xl border text-center transition ${
@@ -1783,7 +1834,7 @@
                     : "bg-slate-950 border-slate-700 hover:border-slate-500 text-white"
               }">
               <div class="font-black text-sm">${c.label}</div>
-              <div class="text-[10px] text-slate-400 mt-0.5">${roundBlocked ? "라운드 제한" : (selected ? "선택됨" : "카드")}</div>
+              <div class="text-[10px] text-slate-400 mt-0.5">${subLabel}</div>
             </button>
           `;
         }).join("");
@@ -1845,7 +1896,10 @@
     function renderCardBadge(c) {
       let style = "bg-slate-950 border-slate-700 text-slate-100";
       let sub = "숫자";
-      if (c.type === "knife") {
+      if (c.type === "special_knife") {
+        style = "bg-teal-950/80 border-teal-400/70 text-teal-200";
+        sub = `특수·${c.usesLeft ?? 2}회`;
+      } else if (c.type === "knife") {
         style = "bg-cyan-950/70 border-cyan-600/60 text-cyan-300";
         sub = "처치";
       } else if (c.type === "zombie_king") {
