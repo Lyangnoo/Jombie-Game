@@ -71,8 +71,8 @@
       <div class="glass-panel rounded-2xl p-6 card-shadow">
         <div class="mb-5">
           <span class="text-xs font-bold uppercase tracking-widest text-red-400">OFFLINE PARTY SOCIAL DEDUCTION</span>
-          <h2 class="text-2xl font-black text-white mt-1">실시간 밀실 좀비 심리전</h2>
-          <p class="text-xs text-slate-400 mt-1">각자의 스마트폰으로 정체를 확인하고, 1:1 밀실 매치와 감염의 심리전을 펼치세요.</p>
+          <h2 id="lobbyHeadingTitle" class="text-2xl font-black text-white mt-1">실시간 밀실 좀비 심리전</h2>
+          <p id="lobbyHeadingDesc" class="text-xs text-slate-400 mt-1">각자의 스마트폰으로 정체를 확인하고, 1:1 밀실 매치와 감염의 심리전을 펼치세요.</p>
         </div>
 
         <div class="space-y-4">
@@ -82,12 +82,66 @@
               class="w-full bg-slate-950 border border-slate-700 focus:border-red-500 rounded-xl px-4 py-3 text-white text-sm outline-none transition" />
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <!-- [A] 방장 QR 코드(?room=XXXXXX)로 접속한 참가자 전용 초간단 입장 화면 -->
+          <div id="qrInviteJoinBox" class="hidden bg-slate-900/90 border border-emerald-700/60 rounded-2xl p-5 space-y-4">
+            <div class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-4 py-3">
+              <div>
+                <span class="text-[11px] text-emerald-400 font-bold block">QR 초대 코드 고정됨</span>
+                <span class="text-xs text-slate-400">초대받은 게임 방에 입장합니다.</span>
+              </div>
+              <span id="qrFixedRoomBadge" class="font-mono text-lg font-black tracking-widest text-emerald-300 bg-emerald-950/70 border border-emerald-700/50 px-3 py-1 rounded-lg">------</span>
+            </div>
+
+            <button onclick="joinRoom()" class="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black py-3.5 rounded-xl text-sm transition">
+              방 입장하기
+            </button>
+
+            <div class="text-center pt-1">
+              <button type="button" onclick="clearQrInviteMode()" class="text-[11px] text-slate-400 hover:text-slate-200 underline">
+                다른 방 코드 직접 입력 / 호스트 메뉴 보기
+              </button>
+            </div>
+          </div>
+
+          <!-- [B] 일반 로비 화면 (방 코드 직접 입력 + 허가된 호스트 전용 방 생성) -->
+          <div id="standardLobbyGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <!-- 기존 방 입장 -->
             <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
               <div>
-                <h3 class="font-bold text-white text-sm">새 게임 방 만들기</h3>
-                <p class="text-[11px] text-slate-400 mt-0.5">QR 코드와 입장 키를 생성합니다.</p>
-                <div class="mt-3 space-y-2">
+                <h3 class="font-bold text-white text-sm">기존 방 입장하기</h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">공유받은 6자리 방 코드를 입력하세요.</p>
+                <div class="mt-3">
+                  <input id="inputRoomCode" type="text" maxlength="6" placeholder="방 코드 6자리"
+                    class="w-full uppercase font-mono tracking-widest text-center bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2.5 text-white text-base outline-none" />
+                </div>
+              </div>
+              <button onclick="joinRoom()" class="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold py-2.5 rounded-xl text-sm transition">
+                방 입장하기
+              </button>
+            </div>
+
+            <!-- 허가된 사람 전용: 방 생성 -->
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
+              <div>
+                <div class="flex items-center justify-between">
+                  <h3 class="font-bold text-white text-sm">새 게임 방 만들기</h3>
+                  <span id="hostUnlockBadge" class="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-700/50">호스트 전용</span>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-0.5">허가된 호스트 키 인증 후 방과 QR을 생성합니다.</p>
+
+                <!-- 잠금 상태: 호스트 인증 코드 입력 -->
+                <div id="hostAuthLockBox" class="mt-3 space-y-2">
+                  <input id="inputHostPasscode" type="password" placeholder="호스트 인증 코드 입력"
+                    onkeydown="if(event.key==='Enter') unlockHostCreatePanel()"
+                    class="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-white text-xs outline-none" />
+                  <button type="button" onclick="unlockHostCreatePanel()" class="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-black py-2 rounded-xl text-xs transition">
+                    호스트 인증하기
+                  </button>
+                  <p id="hostAuthErrorMsg" class="hidden text-[11px] text-rose-400">인증 코드가 일치하지 않습니다.</p>
+                </div>
+
+                <!-- 인증 완료 상태: 방 생성 옵션 -->
+                <div id="hostCreateOptionsBox" class="hidden mt-3 space-y-2">
                   <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                     <input type="radio" name="gmMode" value="auto" checked class="accent-red-500" />
                     <span>딜러 없음 (시스템 자동 진행)</span>
@@ -102,22 +156,10 @@
                   </label>
                 </div>
               </div>
-              <button onclick="createRoom()" class="w-full bg-red-600 hover:bg-red-500 active:scale-[0.99] text-white font-bold py-2.5 rounded-xl text-sm transition">
-                방 생성하기
-              </button>
-            </div>
 
-            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
-              <div>
-                <h3 class="font-bold text-white text-sm">기존 방 입장하기</h3>
-                <p class="text-[11px] text-slate-400 mt-0.5">공유받은 6자리 방 코드를 입력하세요.</p>
-                <div class="mt-3">
-                  <input id="inputRoomCode" type="text" maxlength="6" placeholder="방 코드 6자리"
-                    class="w-full uppercase font-mono tracking-widest text-center bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2.5 text-white text-base outline-none" />
-                </div>
-              </div>
-              <button onclick="joinRoom()" class="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold py-2.5 rounded-xl text-sm transition">
-                방 입장하기
+              <button id="btnCreateRoom" onclick="createRoom()" disabled
+                class="w-full bg-red-600 hover:bg-red-500 disabled:bg-slate-800 disabled:text-slate-500 active:scale-[0.99] text-white font-bold py-2.5 rounded-xl text-sm transition">
+                방 생성하기
               </button>
             </div>
           </div>
@@ -149,7 +191,7 @@
           <div class="bg-white p-2.5 rounded-xl shadow-md">
             <img id="qrCodeImg" src="" alt="입장 QR 코드" class="w-36 h-36 object-contain" />
           </div>
-          <p class="text-[11px] text-slate-400 mt-2">스마트폰 카메라로 스캔하거나 아래 입장 코드를 입력하세요</p>
+          <p class="text-[11px] text-slate-400 mt-2">스마트폰 카메라로 스캔하면 닉네임 입력·입장 화면으로 바로 연결됩니다</p>
           <div class="mt-2 flex items-center gap-2">
             <span id="displayRoomCode" class="font-mono text-2xl font-black tracking-widest text-white bg-slate-950 px-4 py-1.5 rounded-xl border border-slate-700">------</span>
             <button onclick="copyInviteLink()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl border border-slate-700">
@@ -304,7 +346,6 @@
             <span id="myRoundMatchState" class="text-xs font-bold text-amber-400">대기 중</span>
           </div>
 
-          <!-- 매치 불가(직전 라운드 상대만 남음 / 홀수 인원 잔류) 시 활성화되는 턴 넘기기 안내 -->
           <div id="passTurnBanner" class="hidden p-3.5 rounded-xl bg-indigo-950/70 border border-indigo-500/60 space-y-2.5 text-xs">
             <p id="passTurnReasonText" class="text-indigo-200 leading-relaxed font-medium">
               이번 라운드에 더 이상 매치 가능한 상대가 없습니다.
@@ -417,7 +458,6 @@
         </button>
       </div>
 
-      <!-- 1. 게임 소개 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-1.5">
         <h4 class="font-black text-amber-400 text-sm">1. 게임 소개</h4>
         <p class="text-[11px] text-slate-400">장르: 심리전 · 트릭 테이킹 · 마피아형 추리 게임 · 권장 인원: 8~14명 · 진행 방식: 카드 대결과 정보 교환을 통해 생존 및 감염을 겨루는 팀 기반 심리 게임</p>
@@ -425,7 +465,6 @@
         <p>이 게임에서 카드는 단순한 승패 수단이 아니다. 카드는 생존 자원이자 협상 수단이며, 상대를 속이고 심리를 흔드는 도구다. 자신의 정체와 카드 보유량을 공개할지, 누구를 믿을지, 누구와 대결할지는 플레이어의 판단에 달려 있다.</p>
       </section>
 
-      <!-- 2. 게임 구성 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
         <h4 class="font-black text-amber-400 text-sm">2. 게임 구성</h4>
         <div class="space-y-1">
@@ -446,7 +485,6 @@
         </div>
       </section>
 
-      <!-- 3. 역할 및 진영 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
         <h4 class="font-black text-amber-400 text-sm">3. 역할 및 진영</h4>
         <div class="space-y-1.5">
@@ -466,7 +504,6 @@
         </div>
       </section>
 
-      <!-- 4. 역할 배분 및 게임 준비 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
         <h4 class="font-black text-amber-400 text-sm">4. 역할 배분 및 게임 준비</h4>
         <p class="font-bold text-white">4-1. 역할 선정</p>
@@ -480,7 +517,6 @@
         <p>가능하다면 독립된 공간을 확보하는 것이 좋다. 특히 딜러룸을 별도로 마련하면 카드 배분, 감염 통보, 역할 정보 전달 등을 다른 플레이어에게 노출하지 않고 진행할 수 있다.</p>
       </section>
 
-      <!-- 5. 게임 진행 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
         <h4 class="font-black text-amber-400 text-sm">5. 게임 진행</h4>
         <p>게임은 여러 라운드로 진행된다. 각 라운드에서는 플레이어들이 대결 상대를 선택하고 카드 대결을 진행한다.</p>
@@ -516,7 +552,6 @@
         </div>
       </section>
 
-      <!-- 6. 특수 카드 규칙 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
         <h4 class="font-black text-amber-400 text-sm">6. 특수 카드 규칙</h4>
         <div class="space-y-1">
@@ -540,14 +575,12 @@
         </div>
       </section>
 
-      <!-- 7. 감염 시스템 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-1.5">
         <h4 class="font-black text-amber-400 text-sm">7. 감염 시스템</h4>
         <p><strong>7-1. 감염 발생:</strong> 시민이 감염되면 즉시 좀비 진영으로 전환되어 승리 조건이 바뀌며, 물어뜯기 기능이 활성화되고 칼 카드는 소지할 수 없게 된다.</p>
         <p><strong>7-2. 감염 정보:</strong> 감염 사실은 감염된 플레이어 본인만 알 수 있고 자동 공개되지 않으며, 정체를 숨기거나 거짓 정보를 전달할 수 있고 기존·신규 좀비끼리 협력할 수 있다.</p>
       </section>
 
-      <!-- 8. 승리 조건 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-1.5">
         <h4 class="font-black text-amber-400 text-sm">8. 승리 조건</h4>
         <ul class="list-disc pl-4 space-y-1">
@@ -557,7 +590,6 @@
         </ul>
       </section>
 
-      <!-- 9. 정보 공개와 심리전 & 10. 게임의 기본 원칙 -->
       <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
         <h4 class="font-black text-amber-400 text-sm">9. 정보 공개와 심리전</h4>
         <p>정보 공개나 진실 발화를 강제하지 않는다. 카드 보유량 공개, 일부러 패배 요청, 시민 위장, 면역자의 좀비 킹 정보 공유 또는 은폐, 감염자의 허위 정보 유포, 상대 패 추측 등 모든 심리전이 게임의 일부다.</p>
@@ -605,8 +637,12 @@
       appId: "1:995637638842:web:d119a34f59933cb121f483"
     };
 
+    // 방 생성 허가용 호스트 인증 코드 (원하시는 코드로 변경하세요)
+    const HOST_PASSCODE = "3411";
+
     const SESSION_ROOM_KEY = "zombie_active_room";
     const SESSION_NICK_KEY = "zombie_nickname";
+    const SESSION_HOST_UNLOCKED_KEY = "zombie_host_unlocked";
 
     function resolveFirebaseConfig() {
       if (typeof __firebase_config !== "undefined" && __firebase_config) {
@@ -635,12 +671,82 @@
     let identityHidden = false;
     let intentionalLeave = false;
     let isSubmittingMatch = false;
+    let isHostUnlocked = sessionStorage.getItem(SESSION_HOST_UNLOCKED_KEY) === "1";
+    let qrFixedRoomCode = null;
     let cardUidSeq = 1;
 
     function makeCardId(prefix = "c") {
       cardUidSeq += 1;
       return `${prefix}_${Date.now().toString(36)}_${cardUidSeq}_${Math.random().toString(36).slice(2, 6)}`;
     }
+
+    function applyLobbyAccessMode() {
+      const qrBox = document.getElementById("qrInviteJoinBox");
+      const stdGrid = document.getElementById("standardLobbyGrid");
+      const titleEl = document.getElementById("lobbyHeadingTitle");
+      const descEl = document.getElementById("lobbyHeadingDesc");
+
+      if (qrFixedRoomCode) {
+        qrBox.classList.remove("hidden");
+        stdGrid.classList.add("hidden");
+        document.getElementById("qrFixedRoomBadge").textContent = qrFixedRoomCode;
+        document.getElementById("inputRoomCode").value = qrFixedRoomCode;
+        titleEl.textContent = "초대받은 게임 입장";
+        descEl.textContent = "닉네임을 입력하고 '방 입장하기'를 누르면 대기실로 연결됩니다.";
+      } else {
+        qrBox.classList.add("hidden");
+        stdGrid.classList.remove("hidden");
+        titleEl.textContent = "실시간 밀실 좀비 심리전";
+        descEl.textContent = "각자의 스마트폰으로 정체를 확인하고, 1:1 밀실 매치와 감염의 심리전을 펼치세요.";
+      }
+
+      const lockBox = document.getElementById("hostAuthLockBox");
+      const optsBox = document.getElementById("hostCreateOptionsBox");
+      const btnCreate = document.getElementById("btnCreateRoom");
+      const badge = document.getElementById("hostUnlockBadge");
+
+      if (isHostUnlocked) {
+        lockBox.classList.add("hidden");
+        optsBox.classList.remove("hidden");
+        btnCreate.disabled = false;
+        badge.textContent = "호스트 인증됨";
+        badge.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-700/50";
+      } else {
+        lockBox.classList.remove("hidden");
+        optsBox.classList.add("hidden");
+        btnCreate.disabled = true;
+        badge.textContent = "호스트 전용";
+        badge.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-700/50";
+      }
+    }
+
+    window.unlockHostCreatePanel = () => {
+      const inputEl = document.getElementById("inputHostPasscode");
+      const errEl = document.getElementById("hostAuthErrorMsg");
+      if (inputEl.value.trim() === HOST_PASSCODE) {
+        isHostUnlocked = true;
+        sessionStorage.setItem(SESSION_HOST_UNLOCKED_KEY, "1");
+        errEl.classList.add("hidden");
+        inputEl.value = "";
+        applyLobbyAccessMode();
+      } else {
+        errEl.classList.remove("hidden");
+      }
+    };
+
+    window.clearQrInviteMode = () => {
+      qrFixedRoomCode = null;
+      document.getElementById("inputRoomCode").value = "";
+      history.replaceState({}, "", window.location.pathname);
+      applyLobbyAccessMode();
+    };
+
+    const initialParams = new URLSearchParams(window.location.search);
+    const initialRoomParam = (initialParams.get("room") || "").trim().toUpperCase();
+    if (initialRoomParam) {
+      qrFixedRoomCode = initialRoomParam.slice(0, 6);
+    }
+    applyLobbyAccessMode();
 
     const savedNick = sessionStorage.getItem(SESSION_NICK_KEY);
     if (savedNick) {
@@ -675,12 +781,6 @@
 
       onAuthStateChanged(auth, async (user) => {
         currentUser = user;
-        const params = new URLSearchParams(window.location.search);
-        const roomParam = params.get("room");
-        if (roomParam) {
-          document.getElementById("inputRoomCode").value = roomParam.toUpperCase();
-        }
-
         if (user) {
           loadMatchHistory();
           if (savedRoom && !currentRoomCode) {
@@ -831,12 +931,16 @@
     }
 
     window.createRoom = async () => {
+      if (!isHostUnlocked) {
+        return alert("호스트 인증이 필요합니다.");
+      }
       if (!db || !currentUser) return alert("Firebase 연결이 준비되지 않았습니다.");
       const nickname = document.getElementById("inputNickname").value.trim();
       if (!nickname) return alert("닉네임을 입력해 주세요.");
 
       sessionStorage.setItem(SESSION_NICK_KEY, nickname);
       intentionalLeave = false;
+      qrFixedRoomCode = null;
 
       const gmMode = document.querySelector('input[name="gmMode"]:checked').value;
       const testMode = document.getElementById("chkTestMode").checked;
@@ -873,7 +977,8 @@
     window.joinRoom = async () => {
       if (!db || !currentUser) return alert("Firebase 연결이 준비되지 않았습니다.");
       const nickname = document.getElementById("inputNickname").value.trim();
-      const code = document.getElementById("inputRoomCode").value.trim().toUpperCase();
+      const rawCode = qrFixedRoomCode || document.getElementById("inputRoomCode").value;
+      const code = rawCode.trim().toUpperCase();
       if (!nickname) return alert("닉네임을 입력해 주세요.");
       if (code.length !== 6) return alert("6자리 방 코드를 입력해 주세요.");
 
@@ -966,7 +1071,10 @@
       }
 
       if (!silent) {
+        qrFixedRoomCode = null;
+        document.getElementById("inputRoomCode").value = "";
         history.replaceState({}, "", window.location.pathname);
+        applyLobbyAccessMode();
         document.getElementById("headerRoomBadge").classList.add("hidden");
         document.getElementById("btnLeaveRoomHeader").classList.add("hidden");
         document.getElementById("challengeModal").classList.add("hidden");
@@ -994,6 +1102,9 @@
         if (!snap.exists()) {
           sessionStorage.removeItem(SESSION_ROOM_KEY);
           currentRoomCode = null;
+          qrFixedRoomCode = null;
+          document.getElementById("inputRoomCode").value = "";
+          applyLobbyAccessMode();
           document.getElementById("headerRoomBadge").classList.add("hidden");
           document.getElementById("btnLeaveRoomHeader").classList.add("hidden");
           ["viewWaiting", "viewGame", "viewMatchArena", "viewGameOver"].forEach(v => {
