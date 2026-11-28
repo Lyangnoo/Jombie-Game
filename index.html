@@ -412,7 +412,7 @@
     // [외부 무료 호스팅 배포 시 아래 객체에 본인의 Firebase 설정값을 붙여넣으세요]
     // =========================================================================
     const CUSTOM_FIREBASE_CONFIG = {
-    apiKey: "AIzaSyB06gJHaaMIKJlBJqvi_-kSNeZAnmsOV60",
+      apiKey: "AIzaSyB06gJHaaMIKJlBJqvi_-kSNeZAnmsOV60",
       authDomain: "jombie-game.firebaseapp.com",
       projectId: "jombie-game",
       storageBucket: "jombie-game.firebasestorage.app",
@@ -1197,11 +1197,35 @@
       return remaining;
     }
 
-    // 특수 칼 사용 시 남은 횟수 1 차감 (1 남으면 손패에 유지, 0이 되면 소멸)
-    function consumeSpecialKnife(player, cardObj) {
+    // 패에 남아있는 숫자 카드 중 가장 낮은 카드 1장을 제거하고 반환
+    function removeLowestNumberFromHand(player) {
+      const numIndices = [];
+      (player.hand || []).forEach((c, idx) => {
+        if (c.type === "number") numIndices.push(idx);
+      });
+      if (numIndices.length === 0) return null;
+
+      numIndices.sort((a, b) => {
+        const ca = player.hand[a];
+        const cb = player.hand[b];
+        return (ca.value - cb.value) || ((SUIT_RANK[ca.suit] || 0) - (SUIT_RANK[cb.suit] || 0));
+      });
+      const targetIdx = numIndices[0];
+      const [removed] = player.hand.splice(targetIdx, 1);
+      return removed;
+    }
+
+    // 특수 칼 사용 시 잔여 횟수 1 차감 (반환값: 차감 후 남은 횟수)
+    function decrementSpecialKnifeUses(cardObj) {
       const currentUses = typeof cardObj.usesLeft === "number" ? cardObj.usesLeft : 2;
+      return Math.max(0, currentUses - 1);
+    }
+
+    // 면역자가 특수 칼을 사용한 뒤 손패에 반환할지 여부 결정
+    // - firstUse: true면 이번에 처음 사용한 것(남은 횟수 1 -> 패에 (1/2)로 복귀)
+    // - firstUse: false면 두 번째 사용한 것(남은 횟수 0 -> 소멸, 패에 미복귀)
+    function restoreSpecialKnifeIfRemaining(player, cardObj, nextUses) {
       const maxUses = typeof cardObj.maxUses === "number" ? cardObj.maxUses : 2;
-      const nextUses = currentUses - 1;
       if (nextUses > 0) {
         player.hand.push({
           id: cardObj.id || makeCardId("spknife"),
@@ -1210,21 +1234,9 @@
           usesLeft: nextUses,
           maxUses
         });
+        return true;
       }
-      return nextUses;
-    }
-
-    // 시민 오발 등으로 사용이 무효화될 때 기존 횟수 그대로 반환
-    function refundSpecialKnife(player, cardObj) {
-      const uses = typeof cardObj.usesLeft === "number" ? cardObj.usesLeft : 2;
-      const maxUses = typeof cardObj.maxUses === "number" ? cardObj.maxUses : 2;
-      player.hand.push({
-        id: cardObj.id || makeCardId("spknife"),
-        type: "special_knife",
-        label: "특수 칼",
-        usesLeft: uses,
-        maxUses
-      });
+      return false;
     }
 
     function computeMatchOutcome(data, id1, id2, c1, c2) {
@@ -1245,39 +1257,86 @@
       const p1Queen = c1.some(c => c.type === "zombie_queen");
       const p2Queen = c2.some(c => c.type === "zombie_queen");
 
+      // 두 플레이어가 제출한 특수 칼의 사용 횟수를 상대 무관하게 미리 차감
+      const spState = {};
+      if (p1KnifeCard && p1KnifeCard.type === "special_knife") {
+        const nextUses = decrementSpecialKnifeUses(p1KnifeCard);
+        spState[id1] = {
+          card: p1KnifeCard,
+          nextUses,
+          maxUses: p1KnifeCard.maxUses ?? 2,
+          isFirstUse: nextUses > 0
+        };
+      }
+      if (p2KnifeCard && p2KnifeCard.type === "special_knife") {
+        const nextUses = decrementSpecialKnifeUses(p2KnifeCard);
+        spState[id2] = {
+          card: p2KnifeCard,
+          nextUses,
+          maxUses: p2KnifeCard.maxUses ?? 2,
+          isFirstUse: nextUses > 0
+        };
+      }
+
       let winnerId = null;
       let headline = "";
       let summary = "";
       let publicLog = `${p1.name}님과 ${p2.name}님이 밀실 매치를 마쳤습니다.`;
 
+      // 면역자 시민 오발 패배 처리 헬퍼
+      const resolveImmuneKnifeMisfire = (attacker, defender, attackerCards, attackerId) => {
+        const numCard = attackerCards.find(c => c.type === "number");
+        if (numCard) {
+          defender.hand.push({ ...numCard, id: numCard.id || makeCardId("num") });
+        }
+
+        const st = spState[attackerId];
+        if (!st) {
+          // 일반 칼(시민) 오발 패배
+          attacker.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+          return `시민에게 칼을 사용해 패배했습니다. 칼은 반환되고 제출한 숫자 카드(${numCard ? numCard.label : "없음"})는 ${defender.name}님에게 넘어갔습니다.`;
+        }
+
+        if (st.isFirstUse) {
+          // 1번째 사용 패배: 특수 칼 (1/2) 반환 + 패에 있는 가장 낮은 숫자 카드 1장 회수
+          restoreSpecialKnifeIfRemaining(attacker, st.card, st.nextUses);
+          const droppedLow = removeLowestNumberFromHand(attacker);
+          const lowMsg = droppedLow ? `패의 최저 숫자 카드(${droppedLow.label})가 회수` : "회수할 숫자 카드가 없음";
+          return `시민에게 특수 칼(1회차)을 사용해 패배했습니다! 특수 칼(1/${st.maxUses})은 돌아왔지만 제출 숫자 카드(${numCard ? numCard.label : "없음"})는 상대에게 넘어가고, ${lowMsg}되었습니다.`;
+        } else {
+          // 2번째 사용 패배: 제출 숫자 카드 상대 양도 + 특수 칼 카드도 소멸(반환 없음)
+          return `시민에게 특수 칼(2회차)을 사용해 패배했습니다! 제출 숫자 카드(${numCard ? numCard.label : "없음"})는 상대에게 넘어가고, 2회를 모두 소진한 특수 칼 카드도 사라졌습니다.`;
+        }
+      };
+
       if ((p1King || p1Queen) && p2Knife) {
         winnerId = id2;
         p1.alive = false;
         p1.hand = [];
-        let leftTxt = "";
+        let extra = "";
         if (p2KnifeCard.type === "special_knife") {
-          const rem = consumeSpecialKnife(p2, p2KnifeCard);
-          leftTxt = rem > 0 ? ` (남은 횟수 ${rem}/2)` : " (2회 모두 소진)";
+          const st = spState[id2];
+          restoreSpecialKnifeIfRemaining(p2, st.card, st.nextUses);
+          extra = st.nextUses > 0 ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})` : " (특수 칼 2회 모두 소진·소멸)";
         }
         headline = `${p2.name} 승리! (${p2KnifeCard.label}로 좀비 처치)`;
-        summary = `${p2.name}님이 ${p2KnifeCard.label}${leftTxt} 카드로 ${p1.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
+        summary = `${p2.name}님이 ${p2KnifeCard.label}${extra} 카드로 ${p1.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
         publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
       } else if ((p2King || p2Queen) && p1Knife) {
         winnerId = id1;
         p2.alive = false;
         p2.hand = [];
-        let leftTxt = "";
+        let extra = "";
         if (p1KnifeCard.type === "special_knife") {
-          const rem = consumeSpecialKnife(p1, p1KnifeCard);
-          leftTxt = rem > 0 ? ` (남은 횟수 ${rem}/2)` : " (2회 모두 소진)";
+          const st = spState[id1];
+          restoreSpecialKnifeIfRemaining(p1, st.card, st.nextUses);
+          extra = st.nextUses > 0 ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})` : " (특수 칼 2회 모두 소진·소멸)";
         }
         headline = `${p1.name} 승리! (${p1KnifeCard.label}로 좀비 처치)`;
-        summary = `${p1.name}님이 ${p1KnifeCard.label}${leftTxt} 카드로 ${p2.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
+        summary = `${p1.name}님이 ${p1KnifeCard.label}${extra} 카드로 ${p2.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
         publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
       } else if (p1King || p1Queen) {
         winnerId = id1;
-        if (p1KnifeCard && p1KnifeCard.type === "special_knife") consumeSpecialKnife(p1, p1KnifeCard);
-        if (p2KnifeCard && p2KnifeCard.type === "special_knife") refundSpecialKnife(p2, p2KnifeCard);
         if (p1King) p1.hand.push({ id: makeCardId("king"), type: "zombie_king", label: "좀비 킹" });
         if (p1Queen) {
           p1.queenUsesLeft = Math.max(0, p1.queenUsesLeft - 1);
@@ -1292,8 +1351,6 @@
         }
       } else if (p2King || p2Queen) {
         winnerId = id2;
-        if (p2KnifeCard && p2KnifeCard.type === "special_knife") consumeSpecialKnife(p2, p2KnifeCard);
-        if (p1KnifeCard && p1KnifeCard.type === "special_knife") refundSpecialKnife(p1, p1KnifeCard);
         if (p2King) p2.hand.push({ id: makeCardId("king"), type: "zombie_king", label: "좀비 킹" });
         if (p2Queen) {
           p2.queenUsesLeft = Math.max(0, p2.queenUsesLeft - 1);
@@ -1312,60 +1369,77 @@
             winnerId = id1;
             p2.alive = false;
             p2.hand = [];
-            let leftTxt = "";
+            let extra = "";
             if (p1KnifeCard.type === "special_knife") {
-              const rem = consumeSpecialKnife(p1, p1KnifeCard);
-              leftTxt = rem > 0 ? ` (남은 횟수 ${rem}/2)` : " (2회 모두 소진)";
+              const st = spState[id1];
+              restoreSpecialKnifeIfRemaining(p1, st.card, st.nextUses);
+              extra = st.nextUses > 0 ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})` : " (특수 칼 2회 모두 소진·소멸)";
             }
             headline = `${p1.name} 승리! (좀비 처치)`;
-            summary = `${p1.name}님이 ${p1KnifeCard.label}${leftTxt} 카드로 좀비 ${p2.name}님을 탈락시켰습니다!`;
+            summary = `${p1.name}님이 ${p1KnifeCard.label}${extra} 카드로 좀비 ${p2.name}님을 탈락시켰습니다!`;
             publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id2;
-            if (p1KnifeCard.type === "special_knife") {
-              refundSpecialKnife(p1, p1KnifeCard);
-            } else {
-              p1.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
-            }
-            const numCard = c1.find(c => c.type === "number");
-            if (numCard) p2.hand.push({ ...numCard, id: numCard.id || makeCardId("num") });
+            const detail = resolveImmuneKnifeMisfire(p1, p2, c1, id1);
             headline = `${p2.name} 승리! (칼 오발)`;
-            summary = `${p1.name}님이 시민에게 ${p1KnifeCard.label}을 사용해 패배했습니다. 칼은 반환되고 함께 낸 숫자 카드는 ${p2.name}님에게 넘어갔습니다.`;
+            summary = `${p1.name}님이 ${detail}`;
           }
         } else if (p2Knife && !p1Knife) {
           if (p1.infected) {
             winnerId = id2;
             p1.alive = false;
             p1.hand = [];
-            let leftTxt = "";
+            let extra = "";
             if (p2KnifeCard.type === "special_knife") {
-              const rem = consumeSpecialKnife(p2, p2KnifeCard);
-              leftTxt = rem > 0 ? ` (남은 횟수 ${rem}/2)` : " (2회 모두 소진)";
+              const st = spState[id2];
+              restoreSpecialKnifeIfRemaining(p2, st.card, st.nextUses);
+              extra = st.nextUses > 0 ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})` : " (특수 칼 2회 모두 소진·소멸)";
             }
             headline = `${p2.name} 승리! (좀비 처치)`;
-            summary = `${p2.name}님이 ${p2KnifeCard.label}${leftTxt} 카드로 좀비 ${p1.name}님을 탈락시켰습니다!`;
+            summary = `${p2.name}님이 ${p2KnifeCard.label}${extra} 카드로 좀비 ${p1.name}님을 탈락시켰습니다!`;
             publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id1;
-            if (p2KnifeCard.type === "special_knife") {
-              refundSpecialKnife(p2, p2KnifeCard);
-            } else {
-              p2.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
-            }
-            const numCard = c2.find(c => c.type === "number");
-            if (numCard) p1.hand.push({ ...numCard, id: numCard.id || makeCardId("num") });
+            const detail = resolveImmuneKnifeMisfire(p2, p1, c2, id2);
             headline = `${p1.name} 승리! (칼 오발)`;
-            summary = `${p2.name}님이 시민에게 ${p2KnifeCard.label}을 사용해 패배했습니다. 칼은 반환되고 함께 낸 숫자 카드는 ${p1.name}님에게 넘어갔습니다.`;
+            summary = `${p2.name}님이 ${detail}`;
           }
         } else {
-          if (p1KnifeCard.type === "special_knife") refundSpecialKnife(p1, p1KnifeCard);
-          else p1.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
-          if (p2KnifeCard.type === "special_knife") refundSpecialKnife(p2, p2KnifeCard);
-          else p2.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+          // 양쪽 모두 칼 사용(대상이 모두 비감염 시민)
+          const cmp = compareStandard(c1, c2);
+          winnerId = cmp >= 0 ? id1 : id2;
+          const loserId = winnerId === id1 ? id2 : id1;
+          const loser = players[loserId];
+          const loserCards = winnerId === id1 ? c2 : c1;
 
-          winnerId = compareStandard(c1, c2) >= 0 ? id1 : id2;
+          [
+            { pid: id1, pl: p1, kCard: p1KnifeCard },
+            { pid: id2, pl: p2, kCard: p2KnifeCard }
+          ].forEach(({ pid, pl, kCard }) => {
+            if (kCard.type === "special_knife") {
+              const st = spState[pid];
+              restoreSpecialKnifeIfRemaining(pl, st.card, st.nextUses);
+            } else {
+              pl.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+            }
+          });
+
+          if (spState[loserId]) {
+            const st = spState[loserId];
+            if (st.isFirstUse) {
+              removeLowestNumberFromHand(loser);
+            } else {
+              // 2회차 소진 시 특수 칼 카드 제거
+              loser.hand = loser.hand.filter(c => c.type !== "special_knife");
+            }
+          }
+          const lostNum = loserCards.find(c => c.type === "number");
+          if (lostNum) {
+            players[winnerId].hand.push({ ...lostNum, id: lostNum.id || makeCardId("num") });
+          }
+
           headline = `${players[winnerId].name} 판정승!`;
-          summary = `양쪽 모두 칼을 사용했으나 대상이 좀비가 아니어서 칼이 반환되고 숫자 비교로 승패가 갈렸습니다.`;
+          summary = `양쪽 모두 칼을 사용했으나 대상이 좀비가 아니어서 숫자 비교로 승패가 갈렸습니다.`;
         }
       } else {
         const cmp = compareStandard(c1, c2);
