@@ -66,7 +66,7 @@
       이전 방 세션을 복구하는 중입니다...
     </div>
 
-    <!-- 1. 로비 (방 생성 / 입장 / 전적 조회) -->
+    <!-- 1. 로비 -->
     <section id="viewLobby" class="space-y-5 mt-2">
       <div class="glass-panel rounded-2xl p-6 card-shadow">
         <div class="mb-5">
@@ -248,7 +248,6 @@
             <p id="myRoleDesc" class="text-xs text-slate-300 leading-relaxed"></p>
             <div id="mySecretIntel" class="hidden p-2.5 rounded-lg bg-purple-950/60 border border-purple-700/50 text-xs text-purple-200 font-medium"></div>
 
-            <!-- 감염자 전용 고유 능력: 물어 뜯기 활성화 체크 -->
             <div id="biteAbilityBox" class="hidden pt-2 mt-2 border-t border-slate-800">
               <label class="flex items-start gap-2.5 cursor-pointer select-none">
                 <input id="chkUseBite" type="checkbox" onchange="toggleBiteAbility(this.checked)" class="mt-0.5 w-4 h-4 accent-red-600" />
@@ -407,7 +406,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserSessionPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     // =========================================================================
     // [외부 무료 호스팅 배포 시 아래 객체에 본인의 Firebase 설정값을 붙여넣으세요]
@@ -446,10 +445,18 @@
     let currentRoomCode = null;
     let roomUnsubscribe = null;
     let latestRoomData = null;
-    let selectedCardIndices = [];
+    // 카드 고유 id 배열로 관리해 인덱스 꼬임 원천 차단
+    let selectedCardIds = [];
+    let activeMatchIdTracking = null;
     let identityHidden = false;
     let intentionalLeave = false;
     let isSubmittingMatch = false;
+    let cardUidSeq = 1;
+
+    function makeCardId(prefix = "c") {
+      cardUidSeq += 1;
+      return `${prefix}_${Date.now().toString(36)}_${cardUidSeq}_${Math.random().toString(36).slice(2, 6)}`;
+    }
 
     const savedNick = sessionStorage.getItem(SESSION_NICK_KEY);
     if (savedNick) {
@@ -659,7 +666,6 @@
             matchResultAck: true
           }
         },
-        // 동시 다발 매치 지원용 맵 구조
         pendingChallenges: {},
         activeMatches: {},
         logs: [`방 [${code}]이 생성되었습니다. (${gmMode === 'gm' ? '딜러 진행 모드' : '시스템 자동 모드'})`],
@@ -732,7 +738,8 @@
       }
       currentRoomCode = null;
       latestRoomData = null;
-      selectedCardIndices = [];
+      selectedCardIds = [];
+      activeMatchIdTracking = null;
       sessionStorage.removeItem(SESSION_ROOM_KEY);
 
       try {
@@ -767,7 +774,6 @@
               }
             }
 
-            // 나간 사람과 관련된 대기 신청 정리
             const pending = data.pendingChallenges || {};
             Object.entries(pending).forEach(([targetId, ch]) => {
               if (targetId === uid || ch.fromId === uid) {
@@ -833,7 +839,7 @@
       for (let d = 0; d < deckCount; d++) {
         for (const s of suits) {
           for (let n = 1; n <= 10; n++) {
-            cards.push({ type: "number", suit: s, value: n, label: `${s}${n}` });
+            cards.push({ id: makeCardId("num"), type: "number", suit: s, value: n, label: `${s}${n}` });
           }
         }
       }
@@ -875,14 +881,14 @@
         const role = shuffledRoles[idx];
         const hand = [];
         if (role === "zombie_king") {
-          hand.push({ type: "zombie_king", label: "좀비 킹" });
+          hand.push({ id: makeCardId("king"), type: "zombie_king", label: "좀비 킹" });
         } else if (role === "zombie_queen") {
-          hand.push({ type: "zombie_queen", label: "좀비 퀸" });
+          hand.push({ id: makeCardId("queen"), type: "zombie_queen", label: "좀비 퀸" });
         } else if (role === "immune") {
-          hand.push({ type: "knife", label: "칼" });
-          hand.push({ type: "knife", label: "칼" });
+          hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+          hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
         } else {
-          hand.push({ type: "knife", label: "칼" });
+          hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
         }
         while (hand.length < 5 && deck.length > 0) {
           hand.push(deck.pop());
@@ -902,6 +908,9 @@
           matchResultAck: true
         };
       });
+
+      selectedCardIds = [];
+      activeMatchIdTracking = null;
 
       await updateDoc(getRoomRef(data.code), {
         status: "playing",
@@ -924,7 +933,6 @@
       });
     };
 
-    // 특정 플레이어에게 매치 신청 (동시 다발 신청 가능)
     window.sendChallenge = async (targetId) => {
       const data = latestRoomData;
       const myId = currentUser.uid;
@@ -934,11 +942,9 @@
       const pending = data.pendingChallenges || {};
       const active = data.activeMatches || {};
 
-      // 내가 이미 보냈거나 받은 신청, 또는 진행 중인 매치가 있는지 확인
       if (getMyIncomingChallenge(data) || getMyOutgoingChallenge(data) || getMyActiveMatch(data)) {
         return alert("이미 대기 중인 신청이 있거나 대결 중입니다.");
       }
-      // 상대가 이미 다른 사람과 신청/대결 중인지 확인
       if (pending[targetId] || Object.values(pending).some(c => c.fromId === targetId) ||
           Object.values(active).some(m => m.p1 === targetId || m.p2 === targetId)) {
         return alert("상대방이 이미 다른 플레이어와 매치를 진행 중입니다.");
@@ -976,8 +982,8 @@
         return;
       }
 
-      selectedCardIndices = [];
-      const matchId = `${ch.fromId}_${myId}_${Date.now()}`;
+      selectedCardIds = [];
+      const matchId = `m_${ch.fromId}_${myId}_${Date.now()}`;
       await updateDoc(getRoomRef(data.code), {
         [`pendingChallenges.${myId}`]: deleteField(),
         [`activeMatches.${matchId}`]: {
@@ -1015,73 +1021,113 @@
       return false;
     }
 
-    // 매치 카드 선택 & 트랜잭션 기반 원자적 제출/판정
-    window.toggleSelectMatchCard = (idx) => {
-      const pos = selectedCardIndices.indexOf(idx);
-      if (pos >= 0) {
-        selectedCardIndices.splice(pos, 1);
-      } else if (selectedCardIndices.length < 2) {
-        selectedCardIndices.push(idx);
+    // 고유 cardId 기준으로 2장 선택 토글
+    window.toggleSelectMatchCard = (cardId) => {
+      const data = latestRoomData;
+      const m = getMyActiveMatch(data);
+      if (!m || m.status !== "selecting") return;
+
+      const isP1 = m.p1 === currentUser.uid;
+      const alreadySubmitted = isP1 ? !!m.p1Cards : !!m.p2Cards;
+      if (alreadySubmitted) return;
+
+      const me = data.players[currentUser.uid];
+      const targetCard = (me?.hand || []).find(c => c.id === cardId);
+      if (!targetCard) return;
+
+      const isOdd = data.round % 2 === 1;
+      if ((targetCard.type === "zombie_king" && !isOdd) || (targetCard.type === "zombie_queen" && isOdd)) {
+        return;
       }
-      renderMatchArena(latestRoomData);
+
+      const pos = selectedCardIds.indexOf(cardId);
+      if (pos >= 0) {
+        selectedCardIds.splice(pos, 1);
+      } else if (selectedCardIds.length < 2) {
+        selectedCardIds.push(cardId);
+      }
+      renderMatchArena(data, m);
     };
 
+    // 선택한 카드 제출 (재시도 루프 포함으로 경합에도 확실히 커밋)
     window.submitMatchCards = async () => {
       if (isSubmittingMatch) return;
       const data = latestRoomData;
       const m = getMyActiveMatch(data);
-      if (!m || m.status !== "selecting" || selectedCardIndices.length !== 2) return;
+      if (!m || m.status !== "selecting") return;
+      if (selectedCardIds.length !== 2) return alert("카드 2장을 선택해 주세요.");
 
       const myId = currentUser.uid;
       const me = data.players[myId];
-      const chosen = selectedCardIndices.map(i => me.hand[i]);
-      if (chosen.length !== 2 || chosen.some(c => !c)) return;
+      const chosen = selectedCardIds
+        .map(id => (me.hand || []).find(c => c.id === id))
+        .filter(Boolean);
+
+      if (chosen.length !== 2) {
+        selectedCardIds = [];
+        renderMatchArena(data, m);
+        return alert("손패 정보가 갱신되었습니다. 카드를 다시 2장 선택해 주세요.");
+      }
 
       isSubmittingMatch = true;
       const btn = document.getElementById("btnSubmitMatchCards");
       btn.disabled = true;
       btn.textContent = "제출 처리 중...";
 
+      const roomRef = getRoomRef(data.code);
       try {
-        const roomRef = getRoomRef(data.code);
-        await runTransaction(db, async (tx) => {
-          const snap = await tx.get(roomRef);
-          if (!snap.exists()) return;
+        let committed = false;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const snap = await getDoc(roomRef);
+          if (!snap.exists()) break;
           const fresh = snap.data();
           const freshMatch = (fresh.activeMatches || {})[m.matchId];
-          if (!freshMatch || freshMatch.status !== "selecting") return;
+          if (!freshMatch || freshMatch.status !== "selecting") {
+            committed = true;
+            break;
+          }
 
           const isP1 = freshMatch.p1 === myId;
           const p1Cards = isP1 ? chosen : freshMatch.p1Cards;
           const p2Cards = isP1 ? freshMatch.p2Cards : chosen;
 
-          // 한쪽만 제출한 상태면 해당 슬롯만 안전하게 기록
-          if (!p1Cards || !p2Cards) {
-            tx.update(roomRef, {
-              [`activeMatches.${m.matchId}.${isP1 ? "p1Cards" : "p2Cards"}`]: chosen
-            });
-            return;
+          try {
+            if (!p1Cards || !p2Cards) {
+              await updateDoc(roomRef, {
+                [`activeMatches.${m.matchId}.${isP1 ? "p1Cards" : "p2Cards"}`]: chosen
+              });
+            } else {
+              const computed = computeMatchOutcome(fresh, freshMatch.p1, freshMatch.p2, p1Cards, p2Cards);
+              const nextActiveMatches = { ...(fresh.activeMatches || {}) };
+              nextActiveMatches[m.matchId] = {
+                ...freshMatch,
+                p1Cards,
+                p2Cards,
+                status: "resolved",
+                result: computed.result
+              };
+              await updateDoc(roomRef, {
+                players: computed.players,
+                activeMatches: nextActiveMatches,
+                logs: computed.logs
+              });
+            }
+            committed = true;
+            selectedCardIds = [];
+            break;
+          } catch (err) {
+            await new Promise(r => setTimeout(r, 80 * (attempt + 1)));
           }
-
-          // 양쪽 모두 제출 완료 -> 같은 트랜잭션 안에서 즉시 판정 결과까지 기록
-          const computed = computeMatchOutcome(fresh, freshMatch.p1, freshMatch.p2, p1Cards, p2Cards);
-          tx.update(roomRef, {
-            players: computed.players,
-            [`activeMatches.${m.matchId}`]: {
-              ...freshMatch,
-              p1Cards,
-              p2Cards,
-              status: "resolved",
-              result: computed.result
-            },
-            logs: computed.logs
-          });
-        });
-      } catch (e) {
-        console.error("카드 제출 오류:", e);
-        alert("카드 제출 중 일시적 오류가 발생했습니다. 다시 시도해 주세요.");
+        }
+        if (!committed) {
+          alert("카드 제출이 반영되지 않았습니다. 다시 한 번 눌러 주세요.");
+        }
       } finally {
         isSubmittingMatch = false;
+        if (latestRoomData) {
+          const currentM = getMyActiveMatch(latestRoomData);
+          if (currentM) renderMatchArena(latestRoomData, currentM);
+        }
       }
     };
 
@@ -1127,15 +1173,30 @@
     }
 
     function removeSubmittedFromHand(hand, submitted) {
+      const submittedIds = new Set(submitted.map(c => c.id).filter(Boolean));
       const copy = [...hand];
+      const remaining = [];
+      const unmatchedSubmitted = [];
+
       for (const s of submitted) {
-        const idx = copy.findIndex(c => c.type === s.type && c.label === s.label);
-        if (idx >= 0) copy.splice(idx, 1);
+        if (!s.id) unmatchedSubmitted.push(s);
       }
-      return copy;
+
+      for (const card of copy) {
+        if (card.id && submittedIds.has(card.id)) {
+          submittedIds.delete(card.id);
+          continue;
+        }
+        const fallbackIdx = unmatchedSubmitted.findIndex(u => u.type === card.type && u.label === card.label);
+        if (fallbackIdx >= 0) {
+          unmatchedSubmitted.splice(fallbackIdx, 1);
+          continue;
+        }
+        remaining.push(card);
+      }
+      return remaining;
     }
 
-    // 순수 계산 함수로 분리하여 트랜잭션 내부에서 원자적으로 실행
     function computeMatchOutcome(data, id1, id2, c1, c2) {
       const players = JSON.parse(JSON.stringify(data.players));
       const p1 = players[id1];
@@ -1173,10 +1234,10 @@
         publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
       } else if (p1King || p1Queen) {
         winnerId = id1;
-        if (p1King) p1.hand.push({ type: "zombie_king", label: "좀비 킹" });
+        if (p1King) p1.hand.push({ id: makeCardId("king"), type: "zombie_king", label: "좀비 킹" });
         if (p1Queen) {
           p1.queenUsesLeft = Math.max(0, p1.queenUsesLeft - 1);
-          if (p1.queenUsesLeft > 0) p1.hand.push({ type: "zombie_queen", label: "좀비 퀸" });
+          if (p1.queenUsesLeft > 0) p1.hand.push({ id: makeCardId("queen"), type: "zombie_queen", label: "좀비 퀸" });
         }
         headline = `${p1.name} 승리!`;
         if (p2.role === "immune") {
@@ -1187,10 +1248,10 @@
         }
       } else if (p2King || p2Queen) {
         winnerId = id2;
-        if (p2King) p2.hand.push({ type: "zombie_king", label: "좀비 킹" });
+        if (p2King) p2.hand.push({ id: makeCardId("king"), type: "zombie_king", label: "좀비 킹" });
         if (p2Queen) {
           p2.queenUsesLeft = Math.max(0, p2.queenUsesLeft - 1);
-          if (p2.queenUsesLeft > 0) p2.hand.push({ type: "zombie_queen", label: "좀비 퀸" });
+          if (p2.queenUsesLeft > 0) p2.hand.push({ id: makeCardId("queen"), type: "zombie_queen", label: "좀비 퀸" });
         }
         headline = `${p2.name} 승리!`;
         if (p1.role === "immune") {
@@ -1210,9 +1271,9 @@
             publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id2;
-            p1.hand.push({ type: "knife", label: "칼" });
+            p1.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
             const numCard = c1.find(c => c.type === "number");
-            if (numCard) p2.hand.push(numCard);
+            if (numCard) p2.hand.push({ ...numCard, id: numCard.id || makeCardId("num") });
             headline = `${p2.name} 승리! (칼 오발)`;
             summary = `${p1.name}님이 시민에게 칼을 사용해 패배했습니다. 칼은 회수되고 함께 낸 숫자 카드는 ${p2.name}님에게 넘어갔습니다.`;
           }
@@ -1226,15 +1287,15 @@
             publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id1;
-            p2.hand.push({ type: "knife", label: "칼" });
+            p2.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
             const numCard = c2.find(c => c.type === "number");
-            if (numCard) p1.hand.push(numCard);
+            if (numCard) p1.hand.push({ ...numCard, id: numCard.id || makeCardId("num") });
             headline = `${p1.name} 승리! (칼 오발)`;
             summary = `${p2.name}님이 시민에게 칼을 사용해 패배했습니다. 칼은 회수되고 함께 낸 숫자 카드는 ${p1.name}님에게 넘어갔습니다.`;
           }
         } else {
-          p1.hand.push({ type: "knife", label: "칼" });
-          p2.hand.push({ type: "knife", label: "칼" });
+          p1.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
+          p2.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
           winnerId = compareStandard(c1, c2) >= 0 ? id1 : id2;
           headline = `${players[winnerId].name} 판정승!`;
           summary = `양쪽 모두 칼을 사용했으나 대상이 좀비가 아니어서 칼이 회수되고 숫자 비교로 승패가 갈렸습니다.`;
@@ -1249,7 +1310,7 @@
 
         const loserNums = loserCards.filter(c => c.type === "number").sort((a, b) => b.value - a.value);
         if (loserNums.length > 0) {
-          winner.hand.push(loserNums[0]);
+          winner.hand.push({ ...loserNums[0], id: loserNums[0].id || makeCardId("num") });
         }
 
         headline = `${winner.name} 승리!`;
@@ -1304,11 +1365,10 @@
       player.hand = player.hand.filter(c => c.type !== "knife");
       const nums = submittedCards.filter(c => c.type === "number").sort((a, b) => a.value - b.value);
       if (nums.length > 0) {
-        player.hand.push(nums[0]);
+        player.hand.push({ ...nums[0], id: nums[0].id || makeCardId("num") });
       }
     }
 
-    // 결과 확인 완료 후 개별 아레나 종료 & 모든 진행 중 매치가 끝나면 라운드 전환
     window.leaveMatchArena = async () => {
       const data = latestRoomData;
       const m = getMyActiveMatch(data);
@@ -1316,36 +1376,34 @@
 
       const myId = currentUser.uid;
       const roomRef = getRoomRef(data.code);
-      let shouldCheckRound = false;
+      selectedCardIds = [];
 
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(roomRef);
-        if (!snap.exists()) return;
-        const fresh = snap.data();
-        const freshMatch = (fresh.activeMatches || {})[m.matchId];
-        if (!freshMatch) return;
+      const snap = await getDoc(roomRef);
+      if (!snap.exists()) return;
+      const fresh = snap.data();
+      const freshMatch = (fresh.activeMatches || {})[m.matchId];
+      if (!freshMatch) return;
 
-        const players = JSON.parse(JSON.stringify(fresh.players));
-        if (players[myId]) players[myId].matchResultAck = true;
+      const players = JSON.parse(JSON.stringify(fresh.players));
+      if (players[myId]) players[myId].matchResultAck = true;
 
-        const p1Ack = !players[freshMatch.p1] || players[freshMatch.p1].matchResultAck;
-        const p2Ack = !players[freshMatch.p2] || players[freshMatch.p2].matchResultAck;
+      const p1Ack = !players[freshMatch.p1] || players[freshMatch.p1].matchResultAck;
+      const p2Ack = !players[freshMatch.p2] || players[freshMatch.p2].matchResultAck;
 
-        if (p1Ack && p2Ack) {
-          tx.update(roomRef, {
-            players,
-            [`activeMatches.${m.matchId}`]: deleteField()
-          });
-          shouldCheckRound = true;
-        } else {
-          tx.update(roomRef, { players });
-        }
+      const nextActiveMatches = { ...(fresh.activeMatches || {}) };
+      if (p1Ack && p2Ack) {
+        delete nextActiveMatches[m.matchId];
+      }
+
+      await updateDoc(roomRef, {
+        players,
+        activeMatches: nextActiveMatches
       });
 
-      if (shouldCheckRound) {
-        const latestSnap = await getDoc(roomRef);
-        if (latestSnap.exists()) {
-          await checkAndAdvanceRound(latestSnap.data());
+      if (p1Ack && p2Ack) {
+        const afterSnap = await getDoc(roomRef);
+        if (afterSnap.exists()) {
+          await checkAndAdvanceRound(afterSnap.data());
         }
       }
     };
@@ -1488,13 +1546,18 @@
       }
 
       const m = getMyActiveMatch(data);
-      // 매치 진행 중이거나 결과 확인을 아직 안 누른 당사자(방금 탈락한 경우 포함)는 결과창까지 표시
       if (m && me && (m.status === "selecting" || !me.matchResultAck)) {
+        if (activeMatchIdTracking !== m.matchId) {
+          activeMatchIdTracking = m.matchId;
+          selectedCardIds = [];
+        }
         document.getElementById("viewMatchArena").classList.remove("hidden");
         renderMatchArena(data, m);
         return;
       }
 
+      activeMatchIdTracking = null;
+      selectedCardIds = [];
       document.getElementById("viewGame").classList.remove("hidden");
       renderGameDashboard(data);
     }
@@ -1700,15 +1763,18 @@
         const mySubmitted = isP1 ? m.p1Cards : m.p2Cards;
         const oppSubmitted = isP1 ? m.p2Cards : m.p1Cards;
         document.getElementById("opponentSubmitStatus").textContent = oppSubmitted ? "상대 제출 완료!" : "상대 카드 고르는 중...";
-        document.getElementById("selectedCountLabel").textContent = mySubmitted ? 2 : selectedCardIndices.length;
+
+        const validHandIds = new Set((me.hand || []).map(c => c.id));
+        selectedCardIds = selectedCardIds.filter(id => validHandIds.has(id));
+        document.getElementById("selectedCountLabel").textContent = mySubmitted ? 2 : selectedCardIds.length;
 
         const isOdd = data.round % 2 === 1;
-        document.getElementById("arenaHandGrid").innerHTML = me.hand.map((c, idx) => {
-          const selected = selectedCardIndices.includes(idx);
+        document.getElementById("arenaHandGrid").innerHTML = (me.hand || []).map(c => {
+          const selected = selectedCardIds.includes(c.id);
           const roundBlocked = (c.type === "zombie_king" && !isOdd) || (c.type === "zombie_queen" && isOdd);
-          const disabled = !!mySubmitted || roundBlocked;
+          const disabled = !!mySubmitted || roundBlocked || isSubmittingMatch;
           return `
-            <button onclick="toggleSelectMatchCard(${idx})" ${disabled ? "disabled" : ""}
+            <button onclick="toggleSelectMatchCard('${c.id}')" ${disabled ? "disabled" : ""}
               class="p-3 rounded-xl border text-center transition ${
                 selected
                   ? "bg-red-950 border-red-500 ring-2 ring-red-500 text-white"
@@ -1723,19 +1789,22 @@
         }).join("");
 
         const btn = document.getElementById("btnSubmitMatchCards");
-        if (mySubmitted) {
+        if (isSubmittingMatch) {
+          btn.disabled = true;
+          btn.textContent = "제출 처리 중...";
+        } else if (mySubmitted) {
           btn.disabled = true;
           btn.textContent = "제출 완료 — 상대방 제출 대기 중...";
         } else {
-          btn.disabled = selectedCardIndices.length !== 2;
+          btn.disabled = selectedCardIds.length !== 2;
           btn.textContent = "선택한 2장 비공개 제출하기";
         }
       } else {
         document.getElementById("arenaSelectPhase").classList.add("hidden");
         document.getElementById("arenaResultPhase").classList.remove("hidden");
 
-        document.getElementById("matchResultHeadline").textContent = m.result.headline;
-        document.getElementById("matchResultSummary").textContent = m.result.summary;
+        document.getElementById("matchResultHeadline").textContent = m.result?.headline || "매치 결과";
+        document.getElementById("matchResultSummary").textContent = m.result?.summary || "";
 
         const p1 = data.players[m.p1];
         const p2 = data.players[m.p2];
