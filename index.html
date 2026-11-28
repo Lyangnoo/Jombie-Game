@@ -404,25 +404,173 @@
     </div>
   </div>
 
-  <!-- 규칙 요약 모달 -->
+  <!-- 공식 룰북 모달 (v0.1 웹 앱 수정판) -->
   <div id="rulesModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="glass-panel rounded-2xl p-5 max-w-lg w-full max-h-[85vh] overflow-y-auto space-y-3 text-xs leading-relaxed">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-        <h3 class="font-black text-white text-base">좀비 프로토콜 핵심 규칙</h3>
-        <button onclick="toggleRulesModal()" class="text-slate-400 hover:text-white text-sm font-bold">닫기 ✕</button>
+    <div class="glass-panel rounded-2xl p-5 max-w-2xl w-full max-h-[88vh] overflow-y-auto space-y-4 text-xs leading-relaxed text-slate-300">
+      <div class="sticky top-0 bg-slate-950/95 backdrop-blur-md py-2.5 px-1 border-b border-slate-800 flex items-center justify-between z-10">
+        <div>
+          <span class="text-[10px] font-mono uppercase tracking-wider text-amber-400 block">OFFICIAL RULEBOOK DRAFT v0.1</span>
+          <h3 class="font-black text-white text-base">좀비 게임 — 공식 룰북</h3>
+        </div>
+        <button onclick="toggleRulesModal()" class="text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-700">
+          닫기 ✕
+        </button>
       </div>
-      <ul class="space-y-2 text-slate-300 list-disc pl-4">
-        <li><strong>인원 및 라운드:</strong> 8~9인(5R), 10~11인(7R), 12~14인(8R·좀비 퀸 추가). 4라운드 종료 후 전원에게 보너스 카드 +1장 지급.</li>
-        <li><strong>역할 구성:</strong>
-          <br/>- <strong>좀비 킹:</strong> 면역자를 알고 시작. 홀수 라운드에 <em>좀비 킹 카드</em>를 내면 무조건 승리 및 상대 감염(칼 카드에는 패배·사망). 동률 시 생존해 있으면 좀비 승리.
-          <br/>- <strong>좀비 퀸 (12인+):</strong> 짝수 라운드에만 총 2회 <em>좀비 퀸 카드</em>로 감염 가능. 면역자를 모르며 승리 동률 조건에는 미포함.
-          <br/>- <strong>면역자:</strong> 좀비에게 감염되지 않으며 <strong>특수 칼 카드</strong>(총 2회 사용 가능, 좌상단 (2/2) 표기) 1장과 숫자 카드 4장을 보유하고 시작.
-          <br/>- <strong>시민:</strong> <em>칼 카드</em> 1장과 숫자 카드 4장 보유. 좀비에게 칼을 쓰면 좀비 즉사, 시민에게 칼을 쓰면 사용자 패배(칼 회수·함께 낸 숫자 카드 상대 양도).
-        </li>
-        <li><strong>감염 페널티 & 물어 뜯기:</strong> 시민이 감염되면 보유 중인 <em>칼 카드</em>가 즉시 회수되고, 해당 매치에서 낸 카드 중 가장 낮은 숫자 카드 1장을 돌려받습니다. 감염자는 매치 전 개인 화면에서 1회성 고유 능력 <strong>[물어 뜯기]</strong>를 활성화할 수 있으며, 사용 여부는 본인(및 딜러)만 알 수 있습니다.</li>
-        <li><strong>카드 매치 판정:</strong> 칼/특수칼 vs 좀비(칼 승) → 좀비 킹/퀸 확정 감염 → 같은 문양 2장(숫자 합 비교) → 다른 문양 2장(최고 숫자 → 차순위 숫자 → 문양 서열 ♠&gt;◆&gt;♥&gt;♣ 순). 승리자는 패자의 가장 높은 숫자 카드 1장을 획득.</li>
-        <li><strong>턴 넘기기:</strong> 홀수 인원으로 혼자 남거나 직전 라운드 대결 상대만 남아 더 이상 매치가 불가능할 경우 <em>턴 넘기기</em>로 다음 라운드로 넘어갈 수 있으며, 이때 기본 보충 카드는 지급되지 않습니다.</li>
-      </ul>
+
+      <!-- 1. 게임 소개 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-1.5">
+        <h4 class="font-black text-amber-400 text-sm">1. 게임 소개</h4>
+        <p class="text-[11px] text-slate-400">장르: 심리전 · 트릭 테이킹 · 마피아형 추리 게임 · 권장 인원: 8~14명 · 진행 방식: 카드 대결과 정보 교환을 통해 생존 및 감염을 겨루는 팀 기반 심리 게임</p>
+        <p>《좀비 게임》은 트릭 테이킹 방식의 카드 대결에 마피아 게임의 정체 은폐와 감염 시스템을 결합한 심리 게임이다. 플레이어는 시민 또는 좀비 진영에 속하며, 각자의 정체를 숨긴 채 다른 플레이어와 카드 대결을 진행한다. 시민은 좀비를 찾아내 제거하고 생존해야 하며, 좀비는 시민을 감염시켜 자신의 진영으로 끌어들여야 한다.</p>
+        <p>이 게임에서 카드는 단순한 승패 수단이 아니다. 카드는 생존 자원이자 협상 수단이며, 상대를 속이고 심리를 흔드는 도구다. 자신의 정체와 카드 보유량을 공개할지, 누구를 믿을지, 누구와 대결할지는 플레이어의 판단에 달려 있다.</p>
+      </section>
+
+      <!-- 2. 게임 구성 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
+        <h4 class="font-black text-amber-400 text-sm">2. 게임 구성</h4>
+        <div class="space-y-1">
+          <p class="font-bold text-white">2-1. 카드 종류 (일반 숫자 카드 & 특수 카드)</p>
+          <ul class="list-disc pl-4 space-y-1">
+            <li><strong>칼 카드, 특수 칼 카드:</strong> 좀비를 제거할 수 있는 특수 카드</li>
+            <li><strong>물어뜯기:</strong> 좀비가 시민을 감염시키기 위해 사용하는 카드(능력)</li>
+            <li><strong>좀비 킹 카드:</strong> 좀비 킹의 특수 감염 능력</li>
+            <li><strong>숫자 카드:</strong> 카드 매치의 승패를 결정하는 기본 카드</li>
+          </ul>
+        </div>
+        <div class="space-y-1 pt-1 border-t border-slate-800/70">
+          <p class="font-bold text-white">2-2. 게임 진행에 필요한 인물</p>
+          <ul class="list-disc pl-4 space-y-1">
+            <li><strong>플레이어:</strong> 시민 또는 좀비 진영으로 게임에 참여한다.</li>
+            <li><strong>딜러(룰마스터):</strong> 게임 진행과 카드 배분, 감염 및 사망 여부를 관리한다. 원활한 진행을 위해 배치하는 것을 권장한다.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 3. 역할 및 진영 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
+        <h4 class="font-black text-amber-400 text-sm">3. 역할 및 진영</h4>
+        <div class="space-y-1.5">
+          <p class="font-bold text-emerald-400">3-1. 시민 진영</p>
+          <ul class="list-disc pl-4 space-y-1">
+            <li><strong>◎시민:</strong> 기본적인 인간 플레이어다. 칼 카드를 소지하며, 일반 시민은 칼을 1회 사용할 수 있다.</li>
+            <li><strong>◎면역자:</strong> 좀비의 감염 능력에 면역인 특수 시민이다. 칼 카드를 2회 사용할 수 있다.</li>
+          </ul>
+        </div>
+        <div class="space-y-1.5 pt-1.5 border-t border-slate-800/70">
+          <p class="font-bold text-red-400">3-2. 좀비 진영</p>
+          <ul class="list-disc pl-4 space-y-1">
+            <li><strong>◎좀비 킹:</strong> 게임 시작 시 지정되는 특수 좀비다. 면역자가 누구인지 알고 시작한다. 조커(좀비 킹 카드)를 숫자 카드와 함께 제출하면 일반적인 카드 대결 결과와 관계없이 승리하고 상대를 감염시킬 수 있다. <strong>좀비 킹 카드는 홀수 라운드에만 사용할 수 있다.</strong></li>
+            <li><strong>◎좀비 퀸:</strong> 12인 이상 게임에만 나오는 역할이다. 좀비 퀸 카드를 소지하고 있으며 짝수 라운드에 사용하여 상대를 감염시킬 수 있다. <strong>좀비 퀸 카드는 짝수 라운드에만 사용할 수 있다.</strong></li>
+            <li><strong>◎일반 좀비:</strong> 좀비 킹 또는 다른 좀비의 감염으로 탄생한다. 감염되는 즉시 좀비 진영으로 전환되며, 감염 사실을 본인만 알 수 있고 고유 능력인 <strong>물어 뜯기</strong>가 활성화된다.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 4. 역할 배분 및 게임 준비 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
+        <h4 class="font-black text-amber-400 text-sm">4. 역할 배분 및 게임 준비</h4>
+        <p class="font-bold text-white">4-1. 역할 선정</p>
+        <p>역할 카드를 준비한 뒤 섞어서 플레이어에게 한 장씩 배분한다. (조커: 좀비 킹, 스페이드 K: 면역자, 나머지 역할 카드: 시민) 역할 선정이 끝나면 각 플레이어는 한 명씩 딜러룸에 들어간다.</p>
+        <p class="font-bold text-white pt-1">4-2. 초기 카드 지급</p>
+        <ul class="list-disc pl-4 space-y-1">
+          <li>각 플레이어는 역할 카드 외에 카드 4장을 추가로 지급받는다.</li>
+          <li>최초 보유 카드는 총 5장이다.</li>
+        </ul>
+        <p class="font-bold text-white pt-1">4-3. 게임 공간</p>
+        <p>가능하다면 독립된 공간을 확보하는 것이 좋다. 특히 딜러룸을 별도로 마련하면 카드 배분, 감염 통보, 역할 정보 전달 등을 다른 플레이어에게 노출하지 않고 진행할 수 있다.</p>
+      </section>
+
+      <!-- 5. 게임 진행 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
+        <h4 class="font-black text-amber-400 text-sm">5. 게임 진행</h4>
+        <p>게임은 여러 라운드로 진행된다. 각 라운드에서는 플레이어들이 대결 상대를 선택하고 카드 대결을 진행한다.</p>
+        <div class="space-y-1">
+          <p class="font-bold text-white">5-1. 대결 상대 선정</p>
+          <ul class="list-disc pl-4 space-y-1">
+            <li>플레이어들은 서로 합의하여 대결 상대를 정한다(강제 지목 규칙 없음).</li>
+            <li><strong>직전 라운드에 대결한 상대와는 바로 다음 라운드에 다시 대결할 수 없다.</strong> 한 라운드가 지나면 같은 상대와 다시 대결할 수 있다.</li>
+            <li>예시) 1R: A와 B 대결 → 2R: A·B 재대결 불가 → 3R: A·B 재대결 가능.</li>
+            <li>홀수 인원이 남아 1명이 남는 경우 등 매치 가능한 상대가 없으면 턴 넘기기로 진행할 수 있다.</li>
+          </ul>
+        </div>
+        <div class="space-y-1 pt-1 border-t border-slate-800/70">
+          <p class="font-bold text-white">5-2. 카드 제출</p>
+          <p>대결 상대가 정해지면 두 플레이어는 딜러룸으로 이동하여 ① 각자 카드 2장을 선택하고 ② 뒷면으로 제출한 뒤 ③ 모두 제출되면 공개하고 ④ 특수 카드 효과 확인 후 ⑤ 일반 카드 대결 규칙에 따라 승패를 결정한다.</p>
+        </div>
+        <div class="space-y-1 pt-1 border-t border-slate-800/70">
+          <p class="font-bold text-white">5-3. 카드 대결 승패 판정</p>
+          <ul class="list-disc pl-4 space-y-1">
+            <li><strong>① 같은 문양 2장 vs 서로 다른 문양 2장:</strong> 같은 문양 2장을 제출한 플레이어가 무조건 승리한다.</li>
+            <li><strong>② 양쪽 모두 같은 문양 2장:</strong> 각자가 제출한 두 카드의 숫자 합을 비교해 합계가 높은 플레이어가 승리한다.</li>
+            <li><strong>③ 양쪽 모두 서로 다른 문양 2장:</strong> 가장 높은 숫자를 비교하고, 같으면 남은 카드의 숫자를 비교한다.</li>
+            <li><strong>④ 모든 조건이 동일한 경우:</strong> 문양 서열에 따라 승자를 결정한다.</li>
+          </ul>
+        </div>
+        <div class="space-y-1 pt-1 border-t border-slate-800/70">
+          <p class="font-bold text-white">5-4. 승패에 따른 카드 처리</p>
+          <p>일반적인 카드 대결에서 승리한 플레이어는 상대방이 제출한 카드 중 숫자가 가장 높은 카드 1장을 가져가고, 나머지 제출 카드 3장은 모두 폐기한다. 라운드 종료 후 플레이어들은 드로우 카드를 1장 받으며, <strong>5라운드에는 드로우 카드를 2장 받는다.</strong></p>
+        </div>
+        <div class="space-y-1 pt-1 border-t border-slate-800/70">
+          <p class="font-bold text-white">5-5. 카드 소진과 사망</p>
+          <p>플레이어의 카드가 0장이 되는 순간 사망 처리된다. 사망한 플레이어는 즉시 게임에서 제외되고 보유 카드는 회수되며, 진영과 역할은 공개하지 않고 이후 게임에 참여할 수 없다.</p>
+        </div>
+      </section>
+
+      <!-- 6. 특수 카드 규칙 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
+        <h4 class="font-black text-amber-400 text-sm">6. 특수 카드 규칙</h4>
+        <div class="space-y-1">
+          <p class="font-bold text-white">6-1. 좀비 킹의 감염 능력</p>
+          <p>좀비 킹은 좀비 킹 카드와 숫자 카드 1장을 함께 제출하여 감염을 시도할 수 있다. 상대가 일반 시민이라면 즉시 감염되며 카드 매치는 승리 판정이고, 사용한 좀비 킹 카드는 좀비 킹이 회수하며 나머지 제출 카드 3장은 폐기한다. <strong>홀수 라운드에만 사용할 수 있다.</strong></p>
+          <p class="text-purple-200 bg-purple-950/40 border border-purple-800/50 rounded-lg p-2 mt-1">
+            * <strong>면역자에게 조커(좀비 킹 카드)를 사용한 경우:</strong> 면역자는 감염되지 않으며 좀비 킹 카드는 좀비 킹에게 회수된다. 면역자는 상대 플레이어가 좀비 킹이라는 사실을 알게 되며, 이 정보의 공개 여부는 면역자 본인의 자유다.
+          </p>
+        </div>
+        <div class="space-y-1 pt-1 border-t border-slate-800/70">
+          <p class="font-bold text-white">6-2. 칼 카드</p>
+          <ul class="list-disc pl-4 space-y-1">
+            <li><strong>좀비 대상 사용:</strong> 칼 카드를 제출한 플레이어가 상대 좀비를 제거하고, 제거된 좀비는 즉시 사망 처리된다.</li>
+            <li><strong>시민 대상 사용:</strong> 상대가 시민이라면 칼 카드를 제출한 플레이어가 무조건 패배하며, 칼 카드는 회수되고 함께 제출한 숫자 카드는 승리자에게 지급된다.</li>
+            <li><strong>사용 횟수:</strong> 일반 시민 1회 / 면역자 2회.</li>
+          </ul>
+        </div>
+        <div class="space-y-1 pt-1 border-t border-slate-800/70">
+          <p class="font-bold text-white">6-3. 물어 뜯기: 일반 좀비의 감염 능력</p>
+          <p>감염된 플레이어는 카드 매치 시작 전에 물어 뜯기 사용 여부를 결정하며(딜러가 비공개 관리), 상대가 시민이고 대결에서 승리하면 상대가 감염된다. 감염 성공 여부와 상관없이 단 1회만 사용할 수 있으며, 감염 시도 사실은 상대에게 공개하지 않는다.</p>
+        </div>
+      </section>
+
+      <!-- 7. 감염 시스템 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-1.5">
+        <h4 class="font-black text-amber-400 text-sm">7. 감염 시스템</h4>
+        <p><strong>7-1. 감염 발생:</strong> 시민이 감염되면 즉시 좀비 진영으로 전환되어 승리 조건이 바뀌며, 물어뜯기 기능이 활성화되고 칼 카드는 소지할 수 없게 된다.</p>
+        <p><strong>7-2. 감염 정보:</strong> 감염 사실은 감염된 플레이어 본인만 알 수 있고 자동 공개되지 않으며, 정체를 숨기거나 거짓 정보를 전달할 수 있고 기존·신규 좀비끼리 협력할 수 있다.</p>
+      </section>
+
+      <!-- 8. 승리 조건 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-1.5">
+        <h4 class="font-black text-amber-400 text-sm">8. 승리 조건</h4>
+        <ul class="list-disc pl-4 space-y-1">
+          <li><strong>8-1. 시민 진영 승리:</strong> ① 모든 좀비를 제거하거나, ② 최종 라운드 종료 시 시민 진영이 전체 생존자의 과반수 이상을 차지한다.</li>
+          <li><strong>8-2. 좀비 진영 승리:</strong> ① 면역자를 제외한 모든 시민을 감염시키거나, ② 최종 라운드 종료 시 좀비 진영이 전체 생존자의 과반수 이상을 차지한다.</li>
+          <li><strong>8-3. 인원 동률:</strong> 시민과 좀비의 생존자 수가 동일한 경우, 좀비 킹이 살아 있다면 좀비 진영이 승리한다.</li>
+        </ul>
+      </section>
+
+      <!-- 9. 정보 공개와 심리전 & 10. 게임의 기본 원칙 -->
+      <section class="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3.5 space-y-2">
+        <h4 class="font-black text-amber-400 text-sm">9. 정보 공개와 심리전</h4>
+        <p>정보 공개나 진실 발화를 강제하지 않는다. 카드 보유량 공개, 일부러 패배 요청, 시민 위장, 면역자의 좀비 킹 정보 공유 또는 은폐, 감염자의 허위 정보 유포, 상대 패 추측 등 모든 심리전이 게임의 일부다.</p>
+        <h4 class="font-black text-amber-400 text-sm pt-1.5 border-t border-slate-800/70">10. 게임의 기본 원칙</h4>
+        <ol class="list-decimal pl-4 space-y-1">
+          <li>모든 플레이어는 자신의 정체와 정보를 자유롭게 관리할 수 있다.</li>
+          <li>대결 상대 선정은 플레이어 간 협의로 이루어진다.</li>
+          <li>카드의 보유량은 중요한 생존 자원이다.</li>
+          <li>감염은 즉시 진영 전환을 발생시켜 승리 조건을 바꾼다.</li>
+          <li>사망한 플레이어는 게임에서 완전히 제외된다.</li>
+          <li>딜러는 게임의 실제 상태를 정확하게 관리하며, 플레이어에게 공개할 정보는 정해진 규칙에 따른다.</li>
+        </ol>
+      </section>
     </div>
   </div>
 
@@ -966,7 +1114,7 @@
         pendingChallenges: {},
         activeMatches: {},
         logs: [`게임이 시작되었습니다! 총 ${n}명 참가 · 최종 ${maxRounds}라운드 진행.`],
-        observerLogs: [`[${1}R] 게임 시작 (${n}명 참가, 최종 ${maxRounds}R)`]
+        observerLogs: [`[1R] 게임 시작 (${n}명 참가, 최종 ${maxRounds}R)`]
       });
     };
 
@@ -1466,7 +1614,6 @@
 
         const st = spState[attackerId];
         if (!st) {
-          // 일반 칼 오발 패배 시 칼 카드는 회수(폐기)되고 함께 낸 숫자 카드만 상대에게 양도
           return `시민에게 칼을 사용해 패배했습니다. 사용한 칼 카드는 회수·폐기되었고, 함께 제출한 숫자 카드(${numCard ? numCard.label : "없음"})는 ${defender.name}님에게 넘어갔습니다.`;
         }
 
