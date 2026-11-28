@@ -83,7 +83,6 @@
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <!-- 방 만들기 카드 -->
             <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
               <div>
                 <h3 class="font-bold text-white text-sm">새 게임 방 만들기</h3>
@@ -108,7 +107,6 @@
               </button>
             </div>
 
-            <!-- 방 입장하기 카드 -->
             <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
               <div>
                 <h3 class="font-bold text-white text-sm">기존 방 입장하기</h3>
@@ -143,7 +141,7 @@
       </div>
     </section>
 
-    <!-- 2. 대기실 (QR 코드 & 인원 모집) -->
+    <!-- 2. 대기실 -->
     <section id="viewWaiting" class="hidden space-y-4">
       <div class="glass-panel rounded-2xl p-5 card-shadow text-center">
         <span class="text-xs font-bold text-amber-400 tracking-wider">WAITING ROOM</span>
@@ -188,7 +186,6 @@
 
     <!-- 3. 인게임 개인 화면 / 관전 모드 / GM 뷰 -->
     <section id="viewGame" class="hidden space-y-4">
-      <!-- 라운드 상단 상태바 -->
       <div class="glass-panel rounded-2xl p-4 flex items-center justify-between">
         <div>
           <span id="gameRoundLabel" class="text-lg font-black text-white">1 / 7 라운드</span>
@@ -283,7 +280,13 @@
             <h3 class="font-bold text-white text-sm">1:1 밀실 매치 상대 지목</h3>
             <span id="myRoundMatchState" class="text-xs font-bold text-amber-400">대기 중</span>
           </div>
-          <p class="text-[11px] text-slate-400">직전 라운드에 대결한 상대와는 연속 대결할 수 없습니다. 홀수 인원일 때 마지막 1인이 남으면 자동 패스됩니다.</p>
+          <div id="outgoingChallengeBanner" class="hidden p-3 rounded-xl bg-amber-950/60 border border-amber-600/50 flex items-center justify-between text-xs">
+            <span class="text-amber-200"><strong id="outgoingTargetName">상대방</strong>님의 매치 수락을 기다리는 중...</span>
+            <button onclick="cancelOutgoingChallenge()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg font-bold">
+              신청 취소
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400">직전 라운드에 대결한 상대와는 연속 대결할 수 없습니다. 여러 쌍이 동시에 대결할 수 있습니다.</p>
           <div id="matchTargetList" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
         </div>
       </div>
@@ -403,8 +406,8 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserSessionPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     // =========================================================================
     // [외부 무료 호스팅 배포 시 아래 객체에 본인의 Firebase 설정값을 붙여넣으세요]
@@ -446,6 +449,7 @@
     let selectedCardIndices = [];
     let identityHidden = false;
     let intentionalLeave = false;
+    let isSubmittingMatch = false;
 
     const savedNick = sessionStorage.getItem(SESSION_NICK_KEY);
     if (savedNick) {
@@ -463,7 +467,20 @@
       app = initializeApp(fbConfig);
       auth = getAuth(app);
       db = getFirestore(app);
-      signInAnonymously(auth).catch(err => console.error("Auth Error:", err));
+
+      (async () => {
+        try {
+          await setPersistence(auth, browserSessionPersistence);
+        } catch (e) {
+          await setPersistence(auth, inMemoryPersistence);
+        }
+        try {
+          await signInAnonymously(auth);
+        } catch (err) {
+          console.error("Auth Error:", err);
+          alert("로그인 연결 오류(" + err.code + "): Safari 사생활 보호 모드를 끄거나 Firebase 승인 도메인을 확인해 주세요.");
+        }
+      })();
 
       onAuthStateChanged(auth, async (user) => {
         currentUser = user;
@@ -642,8 +659,9 @@
             matchResultAck: true
           }
         },
-        pendingChallenge: null,
-        activeMatch: null,
+        // 동시 다발 매치 지원용 맵 구조
+        pendingChallenges: {},
+        activeMatches: {},
         logs: [`방 [${code}]이 생성되었습니다. (${gmMode === 'gm' ? '딜러 진행 모드' : '시스템 자동 모드'})`],
         winnerInfo: null,
         updatedAt: serverTimestamp()
@@ -733,10 +751,8 @@
             const updates = {};
             const logs = [...(data.logs || []), `${me.name}님이 방에서 나갔습니다.`];
 
-            if (data.status === "waiting" || data.status === "ended") {
-              updates[`players.${uid}`] = deleteField();
-            } else {
-              updates[`players.${uid}`] = deleteField();
+            updates[`players.${uid}`] = deleteField();
+            if (data.status === "playing") {
               logs.push(`(중도 퇴장으로 인원 목록에서 제외됨)`);
             }
 
@@ -751,9 +767,13 @@
               }
             }
 
-            if (data.pendingChallenge && (data.pendingChallenge.fromId === uid || data.pendingChallenge.toId === uid)) {
-              updates.pendingChallenge = null;
-            }
+            // 나간 사람과 관련된 대기 신청 정리
+            const pending = data.pendingChallenges || {};
+            Object.entries(pending).forEach(([targetId, ch]) => {
+              if (targetId === uid || ch.fromId === uid) {
+                updates[`pendingChallenges.${targetId}`] = deleteField();
+              }
+            });
 
             updates.logs = logs;
             await updateDoc(ref, updates);
@@ -774,12 +794,6 @@
         document.getElementById("viewLobby").classList.remove("hidden");
       }
     };
-
-    window.addEventListener("pagehide", () => {
-      if (currentRoomCode && !intentionalLeave) {
-        leaveRoom(true);
-      }
-    });
 
     window.addEventListener("popstate", () => {
       if (currentRoomCode && !intentionalLeave) {
@@ -895,8 +909,8 @@
         maxRounds,
         deck,
         players: updatedPlayers,
-        pendingChallenge: null,
-        activeMatch: null,
+        pendingChallenges: {},
+        activeMatches: {},
         logs: [`게임이 시작되었습니다! 총 ${n}명 참가 · 최종 ${maxRounds}라운드 진행.`]
       });
     };
@@ -910,41 +924,66 @@
       });
     };
 
+    // 특정 플레이어에게 매치 신청 (동시 다발 신청 가능)
     window.sendChallenge = async (targetId) => {
       const data = latestRoomData;
-      const me = data?.players?.[currentUser.uid];
-      if (!me || !me.alive) return;
-      if (data.pendingChallenge || data.activeMatch) {
-        return alert("현재 다른 매치 신청이나 대결이 진행 중입니다. 잠시 후 시도해 주세요.");
+      const myId = currentUser.uid;
+      const me = data?.players?.[myId];
+      if (!me || !me.alive || me.matchedThisRound) return;
+
+      const pending = data.pendingChallenges || {};
+      const active = data.activeMatches || {};
+
+      // 내가 이미 보냈거나 받은 신청, 또는 진행 중인 매치가 있는지 확인
+      if (getMyIncomingChallenge(data) || getMyOutgoingChallenge(data) || getMyActiveMatch(data)) {
+        return alert("이미 대기 중인 신청이 있거나 대결 중입니다.");
       }
+      // 상대가 이미 다른 사람과 신청/대결 중인지 확인
+      if (pending[targetId] || Object.values(pending).some(c => c.fromId === targetId) ||
+          Object.values(active).some(m => m.p1 === targetId || m.p2 === targetId)) {
+        return alert("상대방이 이미 다른 플레이어와 매치를 진행 중입니다.");
+      }
+
       await updateDoc(getRoomRef(data.code), {
-        pendingChallenge: {
-          fromId: currentUser.uid,
+        [`pendingChallenges.${targetId}`]: {
+          fromId: myId,
           toId: targetId,
           createdAt: Date.now()
         }
       });
     };
 
+    window.cancelOutgoingChallenge = async () => {
+      const data = latestRoomData;
+      const out = getMyOutgoingChallenge(data);
+      if (!out) return;
+      await updateDoc(getRoomRef(data.code), {
+        [`pendingChallenges.${out.toId}`]: deleteField()
+      });
+    };
+
     window.respondChallenge = async (accepted) => {
       const data = latestRoomData;
-      const ch = data?.pendingChallenge;
-      if (!ch || ch.toId !== currentUser.uid) return;
+      const myId = currentUser.uid;
+      const ch = getMyIncomingChallenge(data);
+      if (!ch) return;
 
       if (!accepted) {
         await updateDoc(getRoomRef(data.code), {
-          pendingChallenge: null,
-          logs: [...data.logs, `${data.players[ch.toId].name}님이 매치 신청을 거절했습니다.`]
+          [`pendingChallenges.${myId}`]: deleteField(),
+          logs: [...(data.logs || []), `${data.players[myId]?.name || "상대"}님이 매치 신청을 거절했습니다.`]
         });
         return;
       }
 
       selectedCardIndices = [];
+      const matchId = `${ch.fromId}_${myId}_${Date.now()}`;
       await updateDoc(getRoomRef(data.code), {
-        pendingChallenge: null,
-        activeMatch: {
+        [`pendingChallenges.${myId}`]: deleteField(),
+        [`activeMatches.${matchId}`]: {
+          matchId,
           p1: ch.fromId,
-          p2: ch.toId,
+          p2: myId,
           p1Cards: null,
           p2Cards: null,
           status: "selecting",
@@ -953,6 +992,30 @@
       });
     };
 
+    function getMyIncomingChallenge(data) {
+      return (data.pendingChallenges || {})[currentUser?.uid] || null;
+    }
+
+    function getMyOutgoingChallenge(data) {
+      return Object.values(data.pendingChallenges || {}).find(c => c.fromId === currentUser?.uid) || null;
+    }
+
+    function getMyActiveMatch(data) {
+      return Object.values(data.activeMatches || {}).find(
+        m => m.p1 === currentUser?.uid || m.p2 === currentUser?.uid
+      ) || null;
+    }
+
+    function isPlayerBusy(data, uid) {
+      const pending = data.pendingChallenges || {};
+      const active = data.activeMatches || {};
+      if (pending[uid]) return true;
+      if (Object.values(pending).some(c => c.fromId === uid)) return true;
+      if (Object.values(active).some(m => m.p1 === uid || m.p2 === uid)) return true;
+      return false;
+    }
+
+    // 매치 카드 선택 & 트랜잭션 기반 원자적 제출/판정
     window.toggleSelectMatchCard = (idx) => {
       const pos = selectedCardIndices.indexOf(idx);
       if (pos >= 0) {
@@ -964,26 +1027,62 @@
     };
 
     window.submitMatchCards = async () => {
+      if (isSubmittingMatch) return;
       const data = latestRoomData;
-      const m = data?.activeMatch;
+      const m = getMyActiveMatch(data);
       if (!m || m.status !== "selecting" || selectedCardIndices.length !== 2) return;
 
-      const me = data.players[currentUser.uid];
+      const myId = currentUser.uid;
+      const me = data.players[myId];
       const chosen = selectedCardIndices.map(i => me.hand[i]);
-      const isP1 = m.p1 === currentUser.uid;
-      const field = isP1 ? "p1Cards" : "p2Cards";
-      const otherCards = isP1 ? m.p2Cards : m.p1Cards;
+      if (chosen.length !== 2 || chosen.some(c => !c)) return;
 
-      if (!otherCards) {
-        await updateDoc(getRoomRef(data.code), {
-          [`activeMatch.${field}`]: chosen
+      isSubmittingMatch = true;
+      const btn = document.getElementById("btnSubmitMatchCards");
+      btn.disabled = true;
+      btn.textContent = "제출 처리 중...";
+
+      try {
+        const roomRef = getRoomRef(data.code);
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(roomRef);
+          if (!snap.exists()) return;
+          const fresh = snap.data();
+          const freshMatch = (fresh.activeMatches || {})[m.matchId];
+          if (!freshMatch || freshMatch.status !== "selecting") return;
+
+          const isP1 = freshMatch.p1 === myId;
+          const p1Cards = isP1 ? chosen : freshMatch.p1Cards;
+          const p2Cards = isP1 ? freshMatch.p2Cards : chosen;
+
+          // 한쪽만 제출한 상태면 해당 슬롯만 안전하게 기록
+          if (!p1Cards || !p2Cards) {
+            tx.update(roomRef, {
+              [`activeMatches.${m.matchId}.${isP1 ? "p1Cards" : "p2Cards"}`]: chosen
+            });
+            return;
+          }
+
+          // 양쪽 모두 제출 완료 -> 같은 트랜잭션 안에서 즉시 판정 결과까지 기록
+          const computed = computeMatchOutcome(fresh, freshMatch.p1, freshMatch.p2, p1Cards, p2Cards);
+          tx.update(roomRef, {
+            players: computed.players,
+            [`activeMatches.${m.matchId}`]: {
+              ...freshMatch,
+              p1Cards,
+              p2Cards,
+              status: "resolved",
+              result: computed.result
+            },
+            logs: computed.logs
+          });
         });
-        return;
+      } catch (e) {
+        console.error("카드 제출 오류:", e);
+        alert("카드 제출 중 일시적 오류가 발생했습니다. 다시 시도해 주세요.");
+      } finally {
+        isSubmittingMatch = false;
       }
-
-      const p1Cards = isP1 ? chosen : m.p1Cards;
-      const p2Cards = isP1 ? m.p2Cards : chosen;
-      await resolveMatchAndAdvance(data, m.p1, m.p2, p1Cards, p2Cards);
     };
 
     const SUIT_RANK = { "♠": 4, "◆": 3, "♥": 2, "♣": 1 };
@@ -1036,7 +1135,8 @@
       return copy;
     }
 
-    async function resolveMatchAndAdvance(data, id1, id2, c1, c2) {
+    // 순수 계산 함수로 분리하여 트랜잭션 내부에서 원자적으로 실행
+    function computeMatchOutcome(data, id1, id2, c1, c2) {
       const players = JSON.parse(JSON.stringify(data.players));
       const p1 = players[id1];
       const p2 = players[id2];
@@ -1190,20 +1290,11 @@
       p1.matchResultAck = false;
       p2.matchResultAck = false;
 
-      const nextActiveMatch = {
-        p1: id1,
-        p2: id2,
-        p1Cards: c1,
-        p2Cards: c2,
-        status: "resolved",
-        result: { winnerId, headline, summary }
-      };
-
-      await updateDoc(getRoomRef(data.code), {
+      return {
         players,
-        activeMatch: nextActiveMatch,
-        logs: [...data.logs, publicLog]
-      });
+        result: { winnerId, headline, summary },
+        logs: [...(data.logs || []), publicLog]
+      };
     }
 
     function applyInfectionPenalty(player, submittedCards) {
@@ -1217,24 +1308,45 @@
       }
     }
 
+    // 결과 확인 완료 후 개별 아레나 종료 & 모든 진행 중 매치가 끝나면 라운드 전환
     window.leaveMatchArena = async () => {
       const data = latestRoomData;
-      const m = data?.activeMatch;
+      const m = getMyActiveMatch(data);
       if (!m) return;
 
-      const players = JSON.parse(JSON.stringify(data.players));
-      players[currentUser.uid].matchResultAck = true;
+      const myId = currentUser.uid;
+      const roomRef = getRoomRef(data.code);
+      let shouldCheckRound = false;
 
-      const bothAcked = players[m.p1].matchResultAck && players[m.p2].matchResultAck;
-      const nextActiveMatch = bothAcked ? null : m;
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(roomRef);
+        if (!snap.exists()) return;
+        const fresh = snap.data();
+        const freshMatch = (fresh.activeMatches || {})[m.matchId];
+        if (!freshMatch) return;
 
-      await updateDoc(getRoomRef(data.code), {
-        players,
-        activeMatch: nextActiveMatch
+        const players = JSON.parse(JSON.stringify(fresh.players));
+        if (players[myId]) players[myId].matchResultAck = true;
+
+        const p1Ack = !players[freshMatch.p1] || players[freshMatch.p1].matchResultAck;
+        const p2Ack = !players[freshMatch.p2] || players[freshMatch.p2].matchResultAck;
+
+        if (p1Ack && p2Ack) {
+          tx.update(roomRef, {
+            players,
+            [`activeMatches.${m.matchId}`]: deleteField()
+          });
+          shouldCheckRound = true;
+        } else {
+          tx.update(roomRef, { players });
+        }
       });
 
-      if (bothAcked) {
-        await checkAndAdvanceRound({ ...data, players, activeMatch: null });
+      if (shouldCheckRound) {
+        const latestSnap = await getDoc(roomRef);
+        if (latestSnap.exists()) {
+          await checkAndAdvanceRound(latestSnap.data());
+        }
       }
     };
 
@@ -1243,6 +1355,10 @@
     };
 
     async function checkAndAdvanceRound(data, force = false) {
+      if (!data || data.status !== "playing") return;
+      const activeCount = Object.keys(data.activeMatches || {}).length;
+      if (!force && activeCount > 0) return;
+
       const players = JSON.parse(JSON.stringify(data.players));
       const aliveList = Object.values(players).filter(p => !p.isGM && p.alive);
 
@@ -1261,7 +1377,7 @@
       const unmatched = aliveList.filter(p => !p.matchedThisRound);
       if (!force && unmatched.length > 1) return;
 
-      const logs = [...data.logs];
+      const logs = [...(data.logs || [])];
       if (unmatched.length === 1) {
         logs.push(`${unmatched[0].name}님이 마지막 홀수 인원으로 남아 이번 라운드를 패스합니다. (보충 없음)`);
       }
@@ -1300,6 +1416,8 @@
         round: nextRound,
         deck,
         players,
+        pendingChallenges: {},
+        activeMatches: {},
         logs
       });
     }
@@ -1334,6 +1452,8 @@
         status: "ended",
         historySaved: true,
         players,
+        pendingChallenges: {},
+        activeMatches: {},
         winnerInfo: { title, desc }
       });
     }
@@ -1358,22 +1478,21 @@
       }
 
       const me = data.players?.[currentUser.uid];
-      const ch = data.pendingChallenge;
+      const ch = getMyIncomingChallenge(data);
       const challengeModal = document.getElementById("challengeModal");
-      if (ch && ch.toId === currentUser.uid && me && me.alive) {
+      if (ch && me && me.alive && !me.matchedThisRound) {
         document.getElementById("challengerNameText").textContent = data.players[ch.fromId]?.name || "상대방";
         challengeModal.classList.remove("hidden");
       } else {
         challengeModal.classList.add("hidden");
       }
 
-      const m = data.activeMatch;
-      if (m && (m.p1 === currentUser.uid || m.p2 === currentUser.uid) && me && me.alive) {
-        if (m.status === "selecting" || !me.matchResultAck) {
-          document.getElementById("viewMatchArena").classList.remove("hidden");
-          renderMatchArena(data);
-          return;
-        }
+      const m = getMyActiveMatch(data);
+      // 매치 진행 중이거나 결과 확인을 아직 안 누른 당사자(방금 탈락한 경우 포함)는 결과창까지 표시
+      if (m && me && (m.status === "selecting" || !me.matchResultAck)) {
+        document.getElementById("viewMatchArena").classList.remove("hidden");
+        renderMatchArena(data, m);
+        return;
       }
 
       document.getElementById("viewGame").classList.remove("hidden");
@@ -1456,14 +1575,13 @@
           </div>
         `).join("");
       } else if (!me.alive) {
-        // 탈락자 전용 관전 모드 화면 렌더링 (정체/손패 비공개 유지)
         spectatorBox.classList.remove("hidden");
         document.getElementById("spectatorRoundInfo").textContent = `${data.round}R 진행 중 · 생존 ${alivePlayers.length}명`;
         document.getElementById("spectatorRosterList").innerHTML = allPlayers.map(p => `
           <div class="flex items-center justify-between bg-slate-950 px-3 py-2 rounded-xl border ${p.alive ? 'border-emerald-800/40' : 'border-slate-800/80 opacity-65'}">
             <span class="font-bold ${p.alive ? 'text-white' : 'text-slate-500 line-through'}">${p.name}${p.uid === me.uid ? ' (나)' : ''}</span>
             <span class="text-[11px] font-bold ${p.alive ? 'text-emerald-400' : 'text-rose-400'}">
-              ${p.alive ? (p.matchedThisRound ? '생존 · 매치완료' : '생존 · 매치대기') : '탈락 · 관전'}
+              ${p.alive ? (p.matchedThisRound ? '생존 · 매치완료' : (isPlayerBusy(data, p.uid) ? '생존 · 대결중' : '생존 · 매치대기')) : '탈락 · 관전'}
             </span>
           </div>
         `).join("");
@@ -1525,18 +1643,33 @@
 
       const stateLabel = document.getElementById("myRoundMatchState");
       const targetList = document.getElementById("matchTargetList");
+      const outgoing = getMyOutgoingChallenge(data);
+      const outBanner = document.getElementById("outgoingChallengeBanner");
+
+      if (outgoing) {
+        outBanner.classList.remove("hidden");
+        document.getElementById("outgoingTargetName").textContent = data.players[outgoing.toId]?.name || "상대방";
+      } else {
+        outBanner.classList.add("hidden");
+      }
+
       if (me.matchedThisRound) {
         stateLabel.textContent = "이번 라운드 매치 완료";
         targetList.innerHTML = `<p class="text-xs text-slate-400 col-span-2">다른 플레이어들의 매치가 끝날 때까지 대기 중입니다.</p>`;
       } else {
-        stateLabel.textContent = "매치 가능";
+        stateLabel.textContent = outgoing ? "응답 대기 중" : "매치 가능";
         const candidates = allPlayers.filter(p => p.uid !== me.uid && p.alive);
+        const iAmBusy = isPlayerBusy(data, me.uid);
+
         targetList.innerHTML = candidates.map(p => {
           const isPrev = p.uid === me.lastOpponentId;
-          const disabled = p.matchedThisRound || isPrev || !!data.pendingChallenge || !!data.activeMatch;
+          const targetBusy = isPlayerBusy(data, p.uid);
+          const disabled = p.matchedThisRound || isPrev || iAmBusy || targetBusy;
           let badge = "신청 가능";
           if (p.matchedThisRound) badge = "매치 완료";
           else if (isPrev) badge = "직전 상대 불가";
+          else if (targetBusy) badge = "다른 매치 중";
+          else if (iAmBusy) badge = "대기 중";
 
           return `
             <button onclick="sendChallenge('${p.uid}')" ${disabled ? "disabled" : ""}
@@ -1553,13 +1686,12 @@
       }
     }
 
-    function renderMatchArena(data) {
-      const m = data.activeMatch;
+    function renderMatchArena(data, m) {
       const isP1 = m.p1 === currentUser.uid;
       const me = data.players[currentUser.uid];
       const opp = data.players[isP1 ? m.p2 : m.p1];
 
-      document.getElementById("arenaTitle").textContent = `${me.name} vs ${opp.name}`;
+      document.getElementById("arenaTitle").textContent = `${me.name} vs ${opp ? opp.name : "상대방"}`;
 
       if (m.status === "selecting") {
         document.getElementById("arenaSelectPhase").classList.remove("hidden");
@@ -1609,12 +1741,12 @@
         const p2 = data.players[m.p2];
         document.getElementById("matchRevealedCards").innerHTML = `
           <div class="bg-slate-900 p-3 rounded-xl border border-slate-800">
-            <span class="font-bold text-slate-300 block mb-1.5">${p1.name} 제출 패</span>
-            <div class="flex gap-1.5">${m.p1Cards.map(c => `<span class="px-2 py-1 rounded bg-slate-950 border border-slate-700 font-bold">${c.label}</span>`).join("")}</div>
+            <span class="font-bold text-slate-300 block mb-1.5">${p1 ? p1.name : "플레이어 1"} 제출 패</span>
+            <div class="flex gap-1.5">${(m.p1Cards || []).map(c => `<span class="px-2 py-1 rounded bg-slate-950 border border-slate-700 font-bold">${c.label}</span>`).join("")}</div>
           </div>
           <div class="bg-slate-900 p-3 rounded-xl border border-slate-800">
-            <span class="font-bold text-slate-300 block mb-1.5">${p2.name} 제출 패</span>
-            <div class="flex gap-1.5">${m.p2Cards.map(c => `<span class="px-2 py-1 rounded bg-slate-950 border border-slate-700 font-bold">${c.label}</span>`).join("")}</div>
+            <span class="font-bold text-slate-300 block mb-1.5">${p2 ? p2.name : "플레이어 2"} 제출 패</span>
+            <div class="flex gap-1.5">${(m.p2Cards || []).map(c => `<span class="px-2 py-1 rounded bg-slate-950 border border-slate-700 font-bold">${c.label}</span>`).join("")}</div>
           </div>
         `;
       }
