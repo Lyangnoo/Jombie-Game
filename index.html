@@ -253,7 +253,7 @@
                 <input id="chkUseBite" type="checkbox" onchange="toggleBiteAbility(this.checked)" class="mt-0.5 w-4 h-4 accent-red-600" />
                 <div>
                   <span class="text-xs font-bold text-red-400 block">[고유 능력] 물어 뜯기 활성화 (1회성)</span>
-                  <span id="biteStatusHint" class="text-[11px] text-slate-400">이번 라운드 매치 시작 전에 체크해 두면, 시민 상대로 승리 시 상대를 감염시킵니다.</span>
+                  <span id="biteStatusHint" class="text-[11px] text-slate-400">이번 라운드 매치 시작 전에 체크해 두면, 시민 상대로 승리 시 상대를 감염시킵니다. (사용 여부는 본인 및 딜러만 확인 가능)</span>
                 </div>
               </label>
             </div>
@@ -336,6 +336,7 @@
             <div class="text-center">
               <span id="matchResultHeadline" class="text-lg font-black text-amber-400">매치 결과</span>
               <p id="matchResultSummary" class="text-xs text-slate-300 mt-1 leading-relaxed"></p>
+              <p id="matchPrivateNote" class="hidden text-xs text-rose-300 bg-rose-950/50 border border-rose-700/50 rounded-lg px-3 py-2 mt-2 leading-relaxed"></p>
             </div>
             <div id="matchRevealedCards" class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800 text-xs"></div>
           </div>
@@ -394,7 +395,7 @@
           <br/>- <strong>면역자:</strong> 좀비에게 감염되지 않으며 <strong>특수 칼 카드</strong>(총 2회 사용 가능, 좌상단 (2/2) 표기) 1장과 숫자 카드 4장을 보유하고 시작.
           <br/>- <strong>시민:</strong> <em>칼 카드</em> 1장과 숫자 카드 4장 보유. 좀비에게 칼을 쓰면 좀비 즉사, 시민에게 칼을 쓰면 사용자 패배(칼 회수·함께 낸 숫자 카드 상대 양도).
         </li>
-        <li><strong>감염 페널티 & 물어 뜯기:</strong> 시민이 감염되면 보유 중인 <em>칼 카드</em>가 즉시 회수되고, 해당 매치에서 낸 카드 중 가장 낮은 숫자 카드 1장을 돌려받습니다. 감염자는 매치 전 개인 화면에서 1회성 고유 능력 <strong>[물어 뜯기]</strong>를 활성화해 승리 시 상대를 감염시킬 수 있습니다.</li>
+        <li><strong>감염 페널티 & 물어 뜯기:</strong> 시민이 감염되면 보유 중인 <em>칼 카드</em>가 즉시 회수되고, 해당 매치에서 낸 카드 중 가장 낮은 숫자 카드 1장을 돌려받습니다. 감염자는 매치 전 개인 화면에서 1회성 고유 능력 <strong>[물어 뜯기]</strong>를 활성화할 수 있으며, 사용 여부는 본인(및 딜러)만 알 수 있습니다.</li>
         <li><strong>카드 매치 판정:</strong> 칼/특수칼 vs 좀비(칼 승) → 좀비 킹/퀸 확정 감염 → 같은 문양 2장(숫자 합 비교) → 다른 문양 2장(최고 숫자 → 차순위 숫자 → 문양 서열 ♠&gt;◆&gt;♥&gt;♣ 순). 승리자는 패자의 가장 높은 숫자 카드 1장을 획득.</li>
         <li><strong>턴 넘기기:</strong> 홀수 인원으로 혼자 남거나 직전 라운드 대결 상대만 남아 더 이상 매치가 불가능할 경우 <em>턴 넘기기</em>로 다음 라운드로 넘어갈 수 있으며, 이때 기본 보충 카드는 지급되지 않습니다.</li>
       </ul>
@@ -950,7 +951,6 @@
       });
     };
 
-    // 현재 라운드에서 아직 매치·패스하지 않은 생존자 중 내가 대결 가능한 유효 상대 목록 반환
     function getValidMatchOpponents(data, myUid) {
       const me = data.players?.[myUid];
       if (!me || me.isGM || !me.alive || me.matchedThisRound || me.passedThisRound) return [];
@@ -963,10 +963,6 @@
       );
     }
 
-    // 내 차례에 '턴 넘기기' 버튼이 필요한 상황인지 판정:
-    // 1) 진행 중인 매치나 대기 중인 신청이 없고
-    // 2) 아직 매치/패스를 완료하지 않은 생존자 중 내가 대결할 수 있는 상대가 0명일 때
-    //    (홀수 인원으로 1명만 남았거나, 남은 미완료 인원들이 서로 직전 라운드 상대라서 매치가 불가능한 경우)
     function evaluateTurnPassEligibility(data, myUid) {
       const me = data.players?.[myUid];
       if (!me || me.isGM || !me.alive || me.matchedThisRound || me.passedThisRound) {
@@ -1197,10 +1193,14 @@
                 status: "resolved",
                 result: computed.result
               };
+              const nextLogs = computed.gmNote
+                ? [...computed.logs, `[GM 전용] ${computed.gmNote}`]
+                : computed.logs;
+
               await updateDoc(roomRef, {
                 players: computed.players,
                 activeMatches: nextActiveMatches,
-                logs: computed.logs
+                logs: nextLogs
               });
             }
             committed = true;
@@ -1338,6 +1338,9 @@
       const p1 = players[id1];
       const p2 = players[id2];
 
+      const p1UsedBite = !!(p1.infected && p1.biteActive);
+      const p2UsedBite = !!(p2.infected && p2.biteActive);
+
       p1.hand = removeSubmittedFromHand(p1.hand, c1);
       p2.hand = removeSubmittedFromHand(p2.hand, c2);
 
@@ -1375,6 +1378,15 @@
       let headline = "";
       let summary = "";
       let publicLog = `${p1.name}님과 ${p2.name}님이 밀실 매치를 마쳤습니다.`;
+      const privateNotes = {};
+      const gmNotes = [];
+
+      if (p1UsedBite) {
+        gmNotes.push(`${p1.name}님이 [물어 뜯기]를 활성화한 채 대결했습니다.`);
+      }
+      if (p2UsedBite) {
+        gmNotes.push(`${p2.name}님이 [물어 뜯기]를 활성화한 채 대결했습니다.`);
+      }
 
       const resolveKnifeKillZombie = (killer, victim, killerCards, victimCards, killerId) => {
         victim.alive = false;
@@ -1492,16 +1504,6 @@
             summary = `${p2.name}님이 ${detail}`;
           }
         } else {
-          // 양쪽 모두 칼(일반 칼 또는 특수 칼)을 제출한 비좀비 맞칼 판정:
-          // - 양쪽 손패에서 제출된 2장은 이미 removeSubmittedFromHand로 제거된 상태.
-          // - 일반 칼은 양측 모두 회수(폐기)되어 돌아오지 않음.
-          // - 면역자 특수 칼:
-          //   * 1회차 사용 + 판정 승: 특수 칼(1/2)만 손패로 복귀, 그 외 제출 카드 전부 폐기
-          //   * 1회차 사용 + 판정 패: 특수 칼(1/2) 손패로 복귀 + 제출 숫자 카드는 승자 양도 + 면역자 손패 최저 숫자 카드 1장 추가 폐기
-          //   * 2회차 사용 + 판정 승: 상대의 최고 숫자 카드 1장 획득, 나머지 전부 폐기(특수 칼 소멸)
-          //   * 2회차 사용 + 판정 패: 제출 숫자 카드는 승자 양도, 나머지 전부 폐기(특수 칼 소멸)
-          // - 시민 일반 칼 맞대결:
-          //   * 승자는 패자가 낸 숫자 카드 1장 획득, 나머지 제출 카드(양측 일반 칼 + 승자 숫자 카드) 전부 폐기
           const cmp = compareStandard(c1, c2);
           winnerId = cmp >= 0 ? id1 : id2;
           const loserId = winnerId === id1 ? id2 : id1;
@@ -1512,15 +1514,12 @@
           const winnerSp = spState[winnerId];
           const loserSp = spState[loserId];
 
-          let detailParts = [];
+          const detailParts = [];
 
-          // 1. 승자 특수 칼 / 전리품 처리
           if (winnerSp && winnerSp.isFirstUse) {
-            // 면역자 특수 칼 1회차 판정 승: 특수 칼(1/2)만 회수, 승자 숫자 카드 및 패자 카드 전부 폐기
             restoreSpecialKnifeIfRemaining(winner, winnerSp.card, winnerSp.nextUses);
             detailParts.push(`${winner.name}님은 특수 칼(1/${winnerSp.maxUses})을 회수했으며 나머지 제출 카드는 모두 폐기되었습니다.`);
           } else {
-            // 시민 일반 칼 승 또는 면역자 특수 칼 2회차 승: 패자의 가장 큰 숫자 카드 1장 획득, 나머지 전부 폐기
             const stolenNum = takeHighestNumberFromSubmitted(loserCards);
             if (stolenNum) {
               winner.hand.push(stolenNum);
@@ -1530,7 +1529,6 @@
             }
           }
 
-          // 2. 패자 특수 칼 1회차 오발 페널티 처리
           if (loserSp && loserSp.isFirstUse) {
             restoreSpecialKnifeIfRemaining(loser, loserSp.card, loserSp.nextUses);
             const droppedLow = removeLowestNumberFromHand(loser);
@@ -1557,14 +1555,17 @@
         headline = `${winner.name} 승리!`;
         summary = `${winner.name}님이 카드 매치에서 승리해 ${topNum ? topNum.label + " 카드를 획득했습니다." : "승리를 거뒀습니다."}`;
 
-        if (winner.infected && winner.biteActive) {
+        const winnerUsedBite = winnerId === id1 ? p1UsedBite : p2UsedBite;
+        if (winner.infected && winnerUsedBite) {
           winner.biteActive = false;
           winner.biteAvailable = false;
           if (!loser.infected && loser.role !== "immune") {
             applyInfectionPenalty(loser, loserCards);
-            summary += ` [물어 뜯기 성공!] ${loser.name}님이 감염되어 칼이 회수되고 최저 숫자 카드 1장을 돌려받았습니다.`;
+            privateNotes[winnerId] = `[물어 뜯기 성공] ${loser.name}님을 감염시켰습니다.`;
+            gmNotes.push(`${winner.name}님의 [물어 뜯기] 성공으로 ${loser.name}님이 감염되었습니다.`);
           } else {
-            summary += ` [물어 뜯기 발동] 상대가 면역자이거나 이미 감염 상태입니다.`;
+            privateNotes[winnerId] = `[물어 뜯기 불발] 상대가 면역자이거나 이미 감염된 상태입니다.`;
+            gmNotes.push(`${winner.name}님의 [물어 뜯기]가 발동했으나 대상(${loser.name})이 면역 또는 기감염 상태입니다.`);
           }
         }
       }
@@ -1572,10 +1573,18 @@
       if (p1.biteActive && winnerId !== id1) {
         p1.biteActive = false;
         p1.biteAvailable = false;
+        if (p1UsedBite) {
+          privateNotes[id1] = `[물어 뜯기 실패] 매치에서 패배해 감염에 실패했으며 능력이 소모되었습니다.`;
+          gmNotes.push(`${p1.name}님이 [물어 뜯기] 사용 후 패배하여 감염에 실패했습니다.`);
+        }
       }
       if (p2.biteActive && winnerId !== id2) {
         p2.biteActive = false;
         p2.biteAvailable = false;
+        if (p2UsedBite) {
+          privateNotes[id2] = `[물어 뜯기 실패] 매치에서 패배해 감염에 실패했으며 능력이 소모되었습니다.`;
+          gmNotes.push(`${p2.name}님이 [물어 뜯기] 사용 후 패배하여 감염에 실패했습니다.`);
+        }
       }
 
       [p1, p2].forEach(pl => {
@@ -1596,7 +1605,14 @@
 
       return {
         players,
-        result: { winnerId, headline, summary },
+        result: {
+          winnerId,
+          headline,
+          summary,
+          privateNotes,
+          gmNotes
+        },
+        gmNote: gmNotes.join(" / "),
         logs: [...(data.logs || []), publicLog]
       };
     }
@@ -1675,10 +1691,8 @@
         return finishGame(data, players, "좀비 진영 승리!", "면역자를 제외한 모든 시민이 감염되었습니다.");
       }
 
-      // 매치도 안 했고 턴 넘기기도 안 한 미행동 생존자 확인
       const unacted = aliveList.filter(p => !p.matchedThisRound && !p.passedThisRound);
 
-      // 미행동 생존자 중 서로 매치가 가능한 쌍이 하나라도 남아있다면 아직 라운드를 넘기지 않음
       if (!force && unacted.length > 0) {
         let anyPairCanMatch = false;
         for (let i = 0; i < unacted.length; i++) {
@@ -1693,8 +1707,6 @@
           if (anyPairCanMatch) break;
         }
         if (anyPairCanMatch) return;
-        // 매치가 가능한 쌍이 없더라도, 해당 플레이어들이 직접 '턴 넘기기' 버튼을 누를 수 있도록 대기
-        // (단, 1명만 남았을 때도 본인이 '턴 넘기기' 버튼을 눌러 확인할 수 있도록 대기)
         return;
       }
 
@@ -1718,8 +1730,6 @@
       const isRound4Bonus = data.round === 4;
 
       aliveList.forEach(p => {
-        // 실제로 1:1 매치를 치른 사람(matchedThisRound === true)만 기본 보충 +1장 지급
-        // '턴 넘기기'(passedThisRound === true)로 매치를 쉬어간 사람은 기본 드로우 제외
         let drawCount = (p.matchedThisRound && !p.passedThisRound) ? 1 : 0;
         if (isRound4Bonus) drawCount += 1;
         for (let i = 0; i < drawCount; i++) {
@@ -1895,7 +1905,7 @@
           <div class="flex items-center justify-between bg-slate-950 px-3 py-2 rounded-lg border border-slate-800">
             <div>
               <span class="font-bold ${p.alive ? 'text-white' : 'text-slate-500 line-through'}">${p.name}</span>
-              <span class="ml-2 text-[11px] ${p.infected ? 'text-red-400' : 'text-emerald-400'}">[${translateRole(p)}]</span>
+              <span class="ml-2 text-[11px] ${p.infected ? 'text-red-400' : 'text-emerald-400'}">[${translateRole(p)}${p.biteActive ? ' · 물어뜯기 ON' : ''}]</span>
             </div>
             <span class="text-slate-400">${p.alive ? `손패 ${p.hand.length}장 · ${p.matchedThisRound ? '매치완료' : (p.passedThisRound ? '턴넘김' : '대기')}` : '탈락(관전중)'}</span>
           </div>
@@ -1916,7 +1926,12 @@
         renderPlayerSelf(data, me, allPlayers);
       }
 
-      document.getElementById("gameLogList").innerHTML = [...(data.logs || [])].reverse().map(l => `
+      const visibleLogs = (data.logs || []).filter(l => {
+        if (!l.startsWith("[GM 전용]")) return true;
+        return !!(me && me.isGM);
+      });
+
+      document.getElementById("gameLogList").innerHTML = [...visibleLogs].reverse().map(l => `
         <div class="bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80">${l}</div>
       `).join("");
     }
@@ -2093,6 +2108,16 @@
 
         document.getElementById("matchResultHeadline").textContent = m.result?.headline || "매치 결과";
         document.getElementById("matchResultSummary").textContent = m.result?.summary || "";
+
+        const privateNoteEl = document.getElementById("matchPrivateNote");
+        const myPrivateNote = m.result?.privateNotes?.[currentUser.uid] || "";
+        if (myPrivateNote) {
+          privateNoteEl.textContent = myPrivateNote;
+          privateNoteEl.classList.remove("hidden");
+        } else {
+          privateNoteEl.textContent = "";
+          privateNoteEl.classList.add("hidden");
+        }
 
         const p1 = data.players[m.p1];
         const p2 = data.players[m.p2];
