@@ -1197,6 +1197,15 @@
       return remaining;
     }
 
+    // 패배자가 제출한 카드 중 가장 높은 숫자 카드 1장을 추출
+    function takeHighestNumberFromSubmitted(submittedCards) {
+      const nums = (submittedCards || [])
+        .filter(c => c.type === "number")
+        .sort((a, b) => (b.value - a.value) || ((SUIT_RANK[b.suit] || 0) - (SUIT_RANK[a.suit] || 0)));
+      if (nums.length === 0) return null;
+      return { ...nums[0], id: nums[0].id || makeCardId("num") };
+    }
+
     // 패에 남아있는 숫자 카드 중 가장 낮은 카드 1장을 제거하고 반환
     function removeLowestNumberFromHand(player) {
       const numIndices = [];
@@ -1222,8 +1231,6 @@
     }
 
     // 면역자가 특수 칼을 사용한 뒤 손패에 반환할지 여부 결정
-    // - firstUse: true면 이번에 처음 사용한 것(남은 횟수 1 -> 패에 (1/2)로 복귀)
-    // - firstUse: false면 두 번째 사용한 것(남은 횟수 0 -> 소멸, 패에 미복귀)
     function restoreSpecialKnifeIfRemaining(player, cardObj, nextUses) {
       const maxUses = typeof cardObj.maxUses === "number" ? cardObj.maxUses : 2;
       if (nextUses > 0) {
@@ -1283,6 +1290,36 @@
       let summary = "";
       let publicLog = `${p1.name}님과 ${p2.name}님이 밀실 매치를 마쳤습니다.`;
 
+      // 칼(일반/특수)로 좀비를 처치할 때 공통 처리:
+      // 1) 패배한 좀비 탈락 처리
+      // 2) 패배자가 낸 카드 중 최고 숫자 카드 1장을 승자 손패로 획득
+      // 3) 특수 칼 사용 횟수 반영(남은 횟수 > 0이면 복귀, 0이면 소멸)
+      const resolveKnifeKillZombie = (killer, victim, killerCards, victimCards, killerId) => {
+        victim.alive = false;
+        victim.hand = [];
+
+        const stolenHighNum = takeHighestNumberFromSubmitted(victimCards);
+        if (stolenHighNum) {
+          killer.hand.push(stolenHighNum);
+        }
+
+        const kCard = killerCards.find(isAnyKnife);
+        let knifeNote = "";
+        if (kCard && kCard.type === "special_knife") {
+          const st = spState[killerId];
+          restoreSpecialKnifeIfRemaining(killer, st.card, st.nextUses);
+          knifeNote = st.nextUses > 0
+            ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})`
+            : " (특수 칼 2회 모두 소진·소멸)";
+        }
+
+        const lootNote = stolenHighNum ? ` 상대의 최고 숫자 카드(${stolenHighNum.label})를 획득했습니다.` : "";
+        return {
+          headline: `${killer.name} 승리! (${kCard.label}로 좀비 처치)`,
+          summary: `${killer.name}님이 ${kCard.label}${knifeNote} 카드로 ${victim.name}님을 탈락시켰습니다!${lootNote}`
+        };
+      };
+
       // 면역자 시민 오발 패배 처리 헬퍼
       const resolveImmuneKnifeMisfire = (attacker, defender, attackerCards, attackerId) => {
         const numCard = attackerCards.find(c => c.type === "number");
@@ -1292,48 +1329,31 @@
 
         const st = spState[attackerId];
         if (!st) {
-          // 일반 칼(시민) 오발 패배
           attacker.hand.push({ id: makeCardId("knife"), type: "knife", label: "칼" });
           return `시민에게 칼을 사용해 패배했습니다. 칼은 반환되고 제출한 숫자 카드(${numCard ? numCard.label : "없음"})는 ${defender.name}님에게 넘어갔습니다.`;
         }
 
         if (st.isFirstUse) {
-          // 1번째 사용 패배: 특수 칼 (1/2) 반환 + 패에 있는 가장 낮은 숫자 카드 1장 회수
           restoreSpecialKnifeIfRemaining(attacker, st.card, st.nextUses);
           const droppedLow = removeLowestNumberFromHand(attacker);
           const lowMsg = droppedLow ? `패의 최저 숫자 카드(${droppedLow.label})가 회수` : "회수할 숫자 카드가 없음";
           return `시민에게 특수 칼(1회차)을 사용해 패배했습니다! 특수 칼(1/${st.maxUses})은 돌아왔지만 제출 숫자 카드(${numCard ? numCard.label : "없음"})는 상대에게 넘어가고, ${lowMsg}되었습니다.`;
         } else {
-          // 2번째 사용 패배: 제출 숫자 카드 상대 양도 + 특수 칼 카드도 소멸(반환 없음)
           return `시민에게 특수 칼(2회차)을 사용해 패배했습니다! 제출 숫자 카드(${numCard ? numCard.label : "없음"})는 상대에게 넘어가고, 2회를 모두 소진한 특수 칼 카드도 사라졌습니다.`;
         }
       };
 
       if ((p1King || p1Queen) && p2Knife) {
         winnerId = id2;
-        p1.alive = false;
-        p1.hand = [];
-        let extra = "";
-        if (p2KnifeCard.type === "special_knife") {
-          const st = spState[id2];
-          restoreSpecialKnifeIfRemaining(p2, st.card, st.nextUses);
-          extra = st.nextUses > 0 ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})` : " (특수 칼 2회 모두 소진·소멸)";
-        }
-        headline = `${p2.name} 승리! (${p2KnifeCard.label}로 좀비 처치)`;
-        summary = `${p2.name}님이 ${p2KnifeCard.label}${extra} 카드로 ${p1.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
+        const res = resolveKnifeKillZombie(p2, p1, c2, c1, id2);
+        headline = res.headline;
+        summary = res.summary;
         publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
       } else if ((p2King || p2Queen) && p1Knife) {
         winnerId = id1;
-        p2.alive = false;
-        p2.hand = [];
-        let extra = "";
-        if (p1KnifeCard.type === "special_knife") {
-          const st = spState[id1];
-          restoreSpecialKnifeIfRemaining(p1, st.card, st.nextUses);
-          extra = st.nextUses > 0 ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})` : " (특수 칼 2회 모두 소진·소멸)";
-        }
-        headline = `${p1.name} 승리! (${p1KnifeCard.label}로 좀비 처치)`;
-        summary = `${p1.name}님이 ${p1KnifeCard.label}${extra} 카드로 ${p2.name}님의 특수 공격을 베어내며 탈락시켰습니다!`;
+        const res = resolveKnifeKillZombie(p1, p2, c1, c2, id1);
+        headline = res.headline;
+        summary = res.summary;
         publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
       } else if (p1King || p1Queen) {
         winnerId = id1;
@@ -1367,16 +1387,9 @@
         if (p1Knife && !p2Knife) {
           if (p2.infected) {
             winnerId = id1;
-            p2.alive = false;
-            p2.hand = [];
-            let extra = "";
-            if (p1KnifeCard.type === "special_knife") {
-              const st = spState[id1];
-              restoreSpecialKnifeIfRemaining(p1, st.card, st.nextUses);
-              extra = st.nextUses > 0 ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})` : " (특수 칼 2회 모두 소진·소멸)";
-            }
-            headline = `${p1.name} 승리! (좀비 처치)`;
-            summary = `${p1.name}님이 ${p1KnifeCard.label}${extra} 카드로 좀비 ${p2.name}님을 탈락시켰습니다!`;
+            const res = resolveKnifeKillZombie(p1, p2, c1, c2, id1);
+            headline = res.headline;
+            summary = res.summary;
             publicLog += ` (${p2.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id2;
@@ -1387,16 +1400,9 @@
         } else if (p2Knife && !p1Knife) {
           if (p1.infected) {
             winnerId = id2;
-            p1.alive = false;
-            p1.hand = [];
-            let extra = "";
-            if (p2KnifeCard.type === "special_knife") {
-              const st = spState[id2];
-              restoreSpecialKnifeIfRemaining(p2, st.card, st.nextUses);
-              extra = st.nextUses > 0 ? ` (특수 칼 남은 횟수 ${st.nextUses}/${st.maxUses})` : " (특수 칼 2회 모두 소진·소멸)";
-            }
-            headline = `${p2.name} 승리! (좀비 처치)`;
-            summary = `${p2.name}님이 ${p2KnifeCard.label}${extra} 카드로 좀비 ${p1.name}님을 탈락시켰습니다!`;
+            const res = resolveKnifeKillZombie(p2, p1, c2, c1, id2);
+            headline = res.headline;
+            summary = res.summary;
             publicLog += ` (${p1.name} 탈락 · 관전 전환)`;
           } else {
             winnerId = id1;
@@ -1405,7 +1411,6 @@
             summary = `${p2.name}님이 ${detail}`;
           }
         } else {
-          // 양쪽 모두 칼 사용(대상이 모두 비감염 시민)
           const cmp = compareStandard(c1, c2);
           winnerId = cmp >= 0 ? id1 : id2;
           const loserId = winnerId === id1 ? id2 : id1;
@@ -1429,7 +1434,6 @@
             if (st.isFirstUse) {
               removeLowestNumberFromHand(loser);
             } else {
-              // 2회차 소진 시 특수 칼 카드 제거
               loser.hand = loser.hand.filter(c => c.type !== "special_knife");
             }
           }
@@ -1449,13 +1453,13 @@
         const loser = players[loserId];
         const loserCards = winnerId === id1 ? c2 : c1;
 
-        const loserNums = loserCards.filter(c => c.type === "number").sort((a, b) => b.value - a.value);
-        if (loserNums.length > 0) {
-          winner.hand.push({ ...loserNums[0], id: loserNums[0].id || makeCardId("num") });
+        const topNum = takeHighestNumberFromSubmitted(loserCards);
+        if (topNum) {
+          winner.hand.push(topNum);
         }
 
         headline = `${winner.name} 승리!`;
-        summary = `${winner.name}님이 카드 매치에서 승리해 ${loserNums[0] ? loserNums[0].label + " 카드를 획득했습니다." : "승리를 거뒀습니다."}`;
+        summary = `${winner.name}님이 카드 매치에서 승리해 ${topNum ? topNum.label + " 카드를 획득했습니다." : "승리를 거뒀습니다."}`;
 
         if (winner.infected && winner.biteActive) {
           winner.biteActive = false;
